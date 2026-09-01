@@ -1,14 +1,12 @@
-"""DNS Analyzer entry point.
+"""DNS Analyzer entry point."""
 
-Phase 1: project skeleton only. No DNS queries yet.
-CLI, resolver, and security analysis will be wired in later phases.
-"""
+from __future__ import annotations
 
 from cli.interface import run
 
 
 def main() -> None:
-    run()
+    raise SystemExit(run())
 
 
 if __name__ == "__main__":

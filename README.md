@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 1 — project skeleton. No DNS queries yet.
+> **Current status:** Phase 2 — domain validation. No DNS queries yet.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -65,13 +65,23 @@ pip install -r requirements.txt
 
 ## Usage
 
-Phase 1 only prints a status line:
+Validate and normalize a domain (or a pasted URL):
 
 ```bash
-python main.py
+python main.py example.com
+python main.py https://example.com/login
+python main.py --help
 ```
 
-Full CLI (`python main.py example.com --security`) arrives in later phases.
+Invalid input exits with code 1 and a clear error. Full analysis flags (`--security`, `--record`, `--reverse`) arrive in later phases.
+
+## Testing
+
+```bash
+python -m pytest tests/test_validator.py -q
+```
+
+Validator tests do not touch the network.
 
 ---
 
@@ -109,7 +119,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 2 — Domain validation**.
+See the phase plan in the project brief. Next: **Phase 3 — DNS resolver architecture**.
 
 ## License
 
