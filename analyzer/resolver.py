@@ -22,7 +22,7 @@ from analyzer.exceptions import (
     DomainNotFoundError,
     NoNameserversError,
 )
-from analyzer.models import DNSRecord
+from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import records_from_answer
 
 _DEFAULT_TIMEOUT = 5.0
@@ -53,6 +53,17 @@ class DNSResolver:
     def resolve_addresses(self, name: str) -> tuple[list[DNSRecord], list[DNSRecord]]:
         """Query A then AAAA. NXDOMAIN on A stops the pair (name does not exist)."""
         return self.resolve_a(name), self.resolve_aaaa(name)
+
+    def lookup_core(self, name: str) -> CoreLookup:
+        """A / AAAA / CNAME / MX / NS for one hostname."""
+        ipv4, ipv6 = self.resolve_addresses(name)
+        return CoreLookup(
+            a=tuple(ipv4),
+            aaaa=tuple(ipv6),
+            cname=tuple(self.resolve_cname(name)),
+            mx=tuple(self.resolve_mx(name)),
+            ns=tuple(self.resolve_ns(name)),
+        )
 
     def resolve_cname(self, name: str) -> list[DNSRecord]:
         return self._query(name, "CNAME")

@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 4: validate input, then show A (IPv4) and AAAA (IPv6) records.
+Phase 5: A, AAAA, CNAME, MX, and NS records.
 Full flags (--record, --security, --all, --reverse) arrive in Phase 14.
 """
 
@@ -10,7 +10,7 @@ import argparse
 import sys
 
 from analyzer.exceptions import DNSQueryError
-from analyzer.models import DNSRecord
+from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
 from analyzer.validator import DomainValidationError, normalize_domain
@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dns-analyzer",
         description="Analyze DNS records and security signals for a domain.",
-        epilog="Phase 4 shows A and AAAA records. More types follow in later phases.",
+        epilog="Phase 5 shows A, AAAA, CNAME, MX, and NS records.",
     )
     parser.add_argument(
         "domain",
@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_address_section(title: str, empty_message: str, records: list[DNSRecord]) -> None:
+def _print_address_section(title: str, empty_message: str, records: tuple[DNSRecord, ...]) -> None:
     print(title)
     if not records:
         print(empty_message)
@@ -61,12 +61,65 @@ def _print_address_section(title: str, empty_message: str, records: list[DNSReco
         print()
 
 
+def _print_cname_section(records: tuple[DNSRecord, ...]) -> None:
+    print("CNAME RECORDS")
+    if not records:
+        print("No CNAME record found.")
+        print()
+        return
+
+    for record in records:
+        print(f"{record.name} → {record.value}")
+        print(f"TTL: {record.ttl}")
+        print()
+
+
+def _print_mx_section(records: tuple[DNSRecord, ...]) -> None:
+    print("MX RECORDS")
+    if not records:
+        print("No MX record found.")
+        print()
+        return
+
+    ordered = sorted(
+        records,
+        key=lambda item: (item.priority is None, item.priority if item.priority is not None else 0, item.value),
+    )
+    for record in ordered:
+        print(record.value)
+        if record.priority is not None:
+            print(f"Priority: {record.priority}")
+        print(f"TTL: {record.ttl}")
+        print()
+
+
+def _print_ns_section(records: tuple[DNSRecord, ...]) -> None:
+    print("NS RECORDS")
+    if not records:
+        print("No NS record found.")
+        print()
+        return
+
+    for record in sorted(records, key=lambda item: item.value):
+        print(record.value)
+        print(f"TTL: {record.ttl}")
+        print()
+
+
+def _print_lookup(lookup: CoreLookup) -> None:
+    _print_address_section("A RECORDS", "No A record found.", lookup.a)
+    _print_address_section("AAAA RECORDS", "No AAAA record found.", lookup.aaaa)
+    _print_cname_section(lookup.cname)
+    _print_mx_section(lookup.mx)
+    _print_ns_section(lookup.ns)
+
+
 def run(argv: list[str] | None = None) -> int:
     _ensure_utf8_stdout()
     args = build_parser().parse_args(argv)
 
     if not args.domain:
-        print("DNS Analyzer — Phase 4 (A / AAAA records)")
+        print("DNS Analyzer — Phase 5 (CNAME / MX / NS)")
         print()
         print("Usage: python main.py <domain>")
         print("Example: python main.py example.com")
@@ -89,11 +142,10 @@ def run(argv: list[str] | None = None) -> int:
     resolver = DNSResolver(timeout=args.timeout)
 
     try:
-        a_records, aaaa_records = resolver.resolve_addresses(domain)
+        lookup = resolver.lookup_core(domain)
     except DNSQueryError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    _print_address_section("A RECORDS", "No A record found.", a_records)
-    _print_address_section("AAAA RECORDS", "No AAAA record found.", aaaa_records)
+    _print_lookup(lookup)
     return 0

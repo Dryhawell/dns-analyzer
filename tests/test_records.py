@@ -33,9 +33,9 @@ def test_ns_strips_trailing_dot() -> None:
     assert format_rdata("NS", DummyRdata("ns1.example.com.")) == "ns1.example.com"
 
 
-def test_mx_value_includes_priority() -> None:
+def test_mx_value_is_exchange_only() -> None:
     rdata = DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")
-    assert format_rdata("MX", rdata) == "10 mail.example.com"
+    assert format_rdata("MX", rdata) == "mail.example.com"
 
 
 def test_caa_quotes_value() -> None:

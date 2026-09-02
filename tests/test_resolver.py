@@ -81,13 +81,35 @@ def test_resolve_addresses_queries_a_then_aaaa(resolver: DNSResolver) -> None:
     assert resolver._client.resolve.call_args_list[1].args[1] == "AAAA"
 
 
+def test_lookup_core_queries_cname_mx_ns(resolver: DNSResolver) -> None:
+    resolver._client.resolve.side_effect = [
+        _answer(DummyRdata("93.184.216.34")),
+        _answer(),
+        _answer(DummyRdata("target.example.net.")),
+        _answer(DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")),
+        _answer(DummyRdata("ns1.example.com.")),
+    ]
+
+    lookup = resolver.lookup_core("www.example.com")
+
+    assert lookup.a[0].value == "93.184.216.34"
+    assert lookup.aaaa == ()
+    assert lookup.cname[0].value == "target.example.net"
+    assert lookup.mx[0].value == "mail.example.com"
+    assert lookup.mx[0].priority == 10
+    assert lookup.ns[0].value == "ns1.example.com"
+    queried_types = [call.args[1] for call in resolver._client.resolve.call_args_list]
+    assert queried_types == ["A", "AAAA", "CNAME", "MX", "NS"]
+
+
 def test_resolve_mx_includes_preference(resolver: DNSResolver) -> None:
     rdata = DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")
     resolver._client.resolve.return_value = _answer(rdata)
 
     records = resolver.resolve_mx("example.com")
 
-    assert records[0].value == "10 mail.example.com"
+    assert records[0].value == "mail.example.com"
+    assert records[0].priority == 10
 
 
 def test_resolve_txt_joins_strings(resolver: DNSResolver) -> None:

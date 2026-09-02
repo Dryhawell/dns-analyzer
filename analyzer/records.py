@@ -17,11 +17,7 @@ def format_rdata(record_type: str, rdata: object) -> str:
     rtype = record_type.upper()
 
     if rtype == "MX":
-        preference = getattr(rdata, "preference", None)
-        exchange = _text(getattr(rdata, "exchange", rdata))
-        if preference is None:
-            return exchange
-        return f"{preference} {exchange}"
+        return _text(getattr(rdata, "exchange", rdata))
 
     if rtype == "TXT":
         strings = getattr(rdata, "strings", None)
@@ -69,9 +65,19 @@ def records_from_answer(record_type: str, queried_name: str, answer: object) -> 
                 name=name,
                 value=format_rdata(record_type, rdata),
                 ttl=ttl,
+                priority=_mx_priority(record_type, rdata),
             )
         )
     return records
+
+
+def _mx_priority(record_type: str, rdata: object) -> int | None:
+    if record_type.upper() != "MX":
+        return None
+    preference = getattr(rdata, "preference", None)
+    if preference is None:
+        return None
+    return int(preference)
 
 
 def canonicalize_ip(value: str) -> str:

@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 4 — A (IPv4) and AAAA (IPv6) records.
+> **Current status:** Phase 5 — CNAME, MX, and NS records.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -72,7 +72,7 @@ python main.py example.com --timeout 3
 python main.py --help
 ```
 
-Phase 4 validates the input, then queries **A** (IPv4) and **AAAA** (IPv6) records. A missing AAAA record is displayed as an observation, not an error.
+Phase 5 validates the input, then queries **A**, **AAAA**, **CNAME**, **MX**, and **NS**. Missing records are observations (for example `www` often has no MX/NS of its own).
 
 Invalid input or DNS failures (NXDOMAIN, timeout) exit with code 1 and a clear error.
 
@@ -82,8 +82,11 @@ Invalid input or DNS failures (NXDOMAIN, timeout) exit with code 1 and a clear e
 | --- | --- | --- |
 | **A** | Hostname → IPv4 address | This name has no IPv4 mapping (it may still have AAAA) |
 | **AAAA** | Hostname → IPv6 address | This name has no IPv6 mapping (very common; not a vulnerability) |
+| **CNAME** | This name is an alias for another name | The name is not an alias (typical at the zone apex) |
+| **MX** | Where email for this name should be delivered | This name is not advertised as a mail domain |
+| **NS** | Authoritative nameservers for this zone | Common on subdomains; the parent zone holds delegation |
 
-TTL is shown next to each record. It is a cache lifetime, not a security score.
+TTL is shown next to each record. It is a cache lifetime, not a security score. MX **priority**: lower number is tried first.
 
 ## Testing
 
@@ -129,7 +132,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 5 — CNAME / MX / NS records**.
+See the phase plan in the project brief. Next: **Phase 6 — TXT / SOA / CAA records**.
 
 ## License
 
