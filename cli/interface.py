@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 9: forward records, reverse DNS, TTL summary, DNSSEC detection.
+Phase 10: records, TTL, DNSSEC detection, SPF from TXT.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
 from analyzer.reverse import looks_like_ip, parse_ip, ptr_name
+from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
 
@@ -216,6 +217,7 @@ def _print_lookup(lookup: CoreLookup, dnssec: DnssecObservation) -> None:
     _print_caa_section(lookup.caa, errors)
     _print_ttl_summary(lookup.all_records())
     _print_dnssec(dnssec)
+    _print_spf(inspect_spf(lookup.txt, lookup.errors))
 
 
 def _print_dnssec(observation: DnssecObservation) -> None:
@@ -225,6 +227,24 @@ def _print_dnssec(observation: DnssecObservation) -> None:
     print(f"DNSKEY: {'FOUND' if observation.dnskey_found else 'NOT FOUND'}")
     print(f"DS:     {'FOUND' if observation.ds_found else 'NOT FOUND'}")
     print(f"AD flag: {'SET' if observation.ad_flag else 'NOT SET'} (this resolver)")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_spf(observation: SpfObservation) -> None:
+    print("SPF")
+    print("────────────────────────")
+    print(f"Status: {observation.status}")
+    if observation.policies:
+        print("Policy:")
+        print(observation.policies[0])
+        if observation.all_term:
+            print(f"all: {observation.all_term} ({observation.all_meaning})")
+        if observation.multiple_records:
+            print("Note: multiple v=spf1 TXT records (RFC 7208 expects one).")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -274,7 +294,7 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 9 (DNSSEC)")
+    print("DNS Analyzer — Phase 10 (SPF)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py --reverse <ip>")

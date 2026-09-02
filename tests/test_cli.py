@@ -161,6 +161,9 @@ def test_cli_prints_txt_soa_caa(mock_resolver_cls, capsys) -> None:
     assert "Serial: 2026090201" in output
     assert '0 issue "letsencrypt.org"' in output
     assert "No CAA record found." not in output
+    assert "SPF" in output
+    assert "Status: FOUND" in output
+    assert "v=spf1 -all" in output
 
 
 @patch("cli.interface.DNSResolver")

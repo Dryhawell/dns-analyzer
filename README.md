@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 9 — DNSSEC detection (observation, not a verdict).
+> **Current status:** Phase 10 — SPF detection from TXT records.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -114,6 +114,16 @@ This tool reports:
 
 `DETECTED` means those signals were visible **to this resolver**. It is **not** a full validation against the IANA root key. `NOT DETECTED` does not mean the domain is compromised — many ISP resolvers hide DNSSEC records.
 
+## SPF
+
+SPF (Sender Policy Framework) is a TXT record starting with `v=spf1`. Receiving mail servers use it to check whether the connecting host is allowed to send mail that claims this domain.
+
+- `-all` — fail (reject unauthorized senders)
+- `~all` — softfail (often still delivered, sometimes marked)
+- `+all` — pass everyone (unusual)
+
+`NOT DETECTED` is not an automatic critical finding. This tool does not follow `include:` chains.
+
 ## Reverse DNS
 
 `python main.py --reverse 8.8.8.8` does **not** contact 8.8.8.8. It queries `8.8.8.8.in-addr.arpa` for a PTR record. Forward (name → IP) and reverse (IP → name) are separate zones; they do not have to match.
@@ -162,7 +172,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 10 — SPF analysis**.
+See the phase plan in the project brief. Next: **Phase 11 — DMARC analysis**.
 
 ## License
 
