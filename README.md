@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 7 — PTR / reverse DNS.
+> **Current status:** Phase 8 — TTL analysis (cache lifetime, not a security score).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -91,7 +91,16 @@ Invalid input or DNS failures (NXDOMAIN on a domain, timeout) exit with code 1 a
 | **CAA** | Which certificate authorities may issue TLS certs | CAs may fall back to parent names; not automatically unsafe |
 | **PTR** | IP → hostname (reverse DNS, under in-addr.arpa / ip6.arpa) | The address has no published reverse name |
 
-TTL is shown next to each record. It is a cache lifetime, not a security score. MX **priority**: lower number is tried first.
+TTL is shown next to each record as a **cache lifetime**, never as a security score. MX **priority**: lower number is tried first.
+
+## TTL, caching, and propagation
+
+TTL (Time To Live) is how long a resolver may reuse an answer without asking again.
+
+- **Low TTL** — a change (new A record, new MX) becomes visible sooner. Resolvers also query more often.
+- **High TTL** — less query load, but after you change a record some users keep the old answer until their cache expires. That delay is what people call **DNS propagation**. It is not a global countdown; each resolver has its own remaining TTL.
+
+A 60-second A record is not "insecure". An 86400-second NS record is not "secure". They are operational choices.
 
 ## Reverse DNS
 
@@ -141,7 +150,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 8 — TTL analysis**.
+See the phase plan in the project brief. Next: **Phase 9 — DNSSEC analysis**.
 
 ## License
 

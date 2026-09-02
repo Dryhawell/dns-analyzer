@@ -43,10 +43,13 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     assert "example.com" in output
     assert "A RECORDS" in output
     assert "93.184.216.34" in output
-    assert "TTL: 3600" in output
+    assert "TTL: 3600s (1h)" in output
     assert "AAAA RECORDS" in output
     assert "2001:db8::1" in output
-    assert "TTL: 300" in output
+    assert "TTL: 300s (5m)" in output
+    assert "TTL SUMMARY" in output
+    assert "not a security score" in output
+    assert "remaining TTL" in output
 
 
 @patch("cli.interface.DNSResolver")

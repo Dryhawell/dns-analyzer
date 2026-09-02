@@ -14,6 +14,7 @@ from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
 from analyzer.reverse import looks_like_ip, parse_ip, ptr_name
+from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
 
 _DEFAULT_TIMEOUT = 5.0
@@ -75,7 +76,7 @@ def _print_address_section(
 
     for record in records:
         print(record.value)
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         scope = describe_ip_scope(record.value)
         if scope:
             print(f"Scope: {scope}")
@@ -92,7 +93,7 @@ def _print_cname_section(
 
     for record in records:
         print(f"{record.name} → {record.value}")
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         print()
 
 
@@ -112,7 +113,7 @@ def _print_mx_section(
         print(record.value)
         if record.priority is not None:
             print(f"Priority: {record.priority}")
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         print()
 
 
@@ -126,7 +127,7 @@ def _print_ns_section(
 
     for record in sorted(records, key=lambda item: item.value):
         print(record.value)
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         print()
 
 
@@ -140,7 +141,7 @@ def _print_txt_section(
 
     for record in records:
         print(f'"{record.value}"')
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         print()
 
 
@@ -155,7 +156,7 @@ def _print_soa_section(
     for record in records:
         for label, value in record.details:
             print(f"{label}: {value}")
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         print()
 
 
@@ -171,8 +172,36 @@ def _print_caa_section(
         print(record.value)
         for label, value in record.details:
             print(f"{label}: {value}")
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         print()
+
+
+def _print_ttl_summary(records: tuple[DNSRecord, ...]) -> None:
+    print("TTL SUMMARY")
+    print("────────────────────────")
+    observation = summarize_ttls(records)
+    if observation is None:
+        print("No TTL values to compare.")
+        print()
+        print("TTL is a cache lifetime, not a security score.")
+        print("Values are remaining TTL at this resolver, not always the zone original.")
+        print()
+        return
+
+    short_types = ", ".join(observation.shortest_types)
+    long_types = ", ".join(observation.longest_types)
+    print(f"Records: {observation.record_count}")
+    print(
+        f"Shortest: {format_duration(observation.shortest)} ({short_types}) — "
+        f"{describe_cache(observation.shortest)}"
+    )
+    print(
+        f"Longest:  {format_duration(observation.longest)} ({long_types}) — "
+        f"{describe_cache(observation.longest)}"
+    )
+    print("TTL is a cache lifetime, not a security score.")
+    print("Values are remaining TTL at this resolver, not always the zone original.")
+    print()
 
 
 def _print_lookup(lookup: CoreLookup) -> None:
@@ -185,6 +214,7 @@ def _print_lookup(lookup: CoreLookup) -> None:
     _print_txt_section(lookup.txt, errors)
     _print_soa_section(lookup.soa, errors)
     _print_caa_section(lookup.caa, errors)
+    _print_ttl_summary(lookup.all_records())
 
 
 def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
@@ -201,9 +231,11 @@ def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
 
     for record in records:
         print(f"→ {record.value}")
-        print(f"TTL: {record.ttl}")
+        print(format_ttl_line(record.ttl))
         print()
     print(f"Queried: {ptr_qname}")
+    print()
+    _print_ttl_summary(tuple(records))
 
 
 def _run_reverse(ip_raw: str, timeout: float) -> int:
@@ -227,7 +259,7 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 7 (PTR / Reverse DNS)")
+    print("DNS Analyzer — Phase 8 (TTL analysis)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py --reverse <ip>")

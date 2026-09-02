@@ -34,3 +34,15 @@ class CoreLookup:
     soa: tuple[DNSRecord, ...]
     caa: tuple[DNSRecord, ...]
     errors: tuple[tuple[str, str], ...] = ()
+
+    def all_records(self) -> tuple[DNSRecord, ...]:
+        return (
+            self.a
+            + self.aaaa
+            + self.cname
+            + self.mx
+            + self.ns
+            + self.txt
+            + self.soa
+            + self.caa
+        )
