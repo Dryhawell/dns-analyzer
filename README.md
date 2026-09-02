@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 6 — TXT, SOA, and CAA records.
+> **Current status:** Phase 7 — PTR / reverse DNS.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -69,12 +69,13 @@ pip install -r requirements.txt
 python main.py example.com
 python main.py https://example.com/login
 python main.py example.com --timeout 3
+python main.py --reverse 8.8.8.8
 python main.py --help
 ```
 
-Phase 6 queries **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. SPF / DMARC parsing comes later; TXT is shown raw. Missing CAA is an observation, not a vulnerability.
+Forward lookup queries **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
 
-Invalid input or DNS failures (NXDOMAIN, timeout) exit with code 1 and a clear error.
+Invalid input or DNS failures (NXDOMAIN on a domain, timeout) exit with code 1 and a clear error.
 
 ## DNS Record Types (so far)
 
@@ -88,8 +89,13 @@ Invalid input or DNS failures (NXDOMAIN, timeout) exit with code 1 and a clear e
 | **TXT** | Free-form text (SPF, verification tokens, policies) | No published text records at this name |
 | **SOA** | Start of authority: primary NS, serial, timers | Common on subdomains; SOA lives at the zone apex |
 | **CAA** | Which certificate authorities may issue TLS certs | CAs may fall back to parent names; not automatically unsafe |
+| **PTR** | IP → hostname (reverse DNS, under in-addr.arpa / ip6.arpa) | The address has no published reverse name |
 
 TTL is shown next to each record. It is a cache lifetime, not a security score. MX **priority**: lower number is tried first.
+
+## Reverse DNS
+
+`python main.py --reverse 8.8.8.8` does **not** contact 8.8.8.8. It queries `8.8.8.8.in-addr.arpa` for a PTR record. Forward (name → IP) and reverse (IP → name) are separate zones; they do not have to match.
 
 ## Testing
 
@@ -135,7 +141,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 7 — PTR / Reverse DNS**.
+See the phase plan in the project brief. Next: **Phase 8 — TTL analysis**.
 
 ## License
 

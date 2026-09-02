@@ -201,3 +201,20 @@ def test_custom_nameservers_are_applied() -> None:
     assert resolver._client.nameservers == ["1.1.1.1"]
     assert resolver._client.timeout == 1.5
     assert resolver._client.lifetime == 1.5
+
+
+def test_resolve_reverse_queries_ptr_zone(resolver: DNSResolver) -> None:
+    resolver._client.resolve.return_value = _answer(DummyRdata("dns.google."))
+
+    records = resolver.resolve_reverse("8.8.8.8")
+
+    assert records[0].value == "dns.google"
+    resolver._client.resolve.assert_called_once_with(
+        "8.8.8.8.in-addr.arpa", "PTR", search=False
+    )
+
+
+def test_resolve_reverse_nxdomain_is_empty(resolver: DNSResolver) -> None:
+    resolver._client.resolve.side_effect = dns.resolver.NXDOMAIN()
+
+    assert resolver.resolve_reverse("203.0.113.1") == []

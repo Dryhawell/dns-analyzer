@@ -25,6 +25,7 @@ from analyzer.exceptions import (
 )
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import records_from_answer
+from analyzer.reverse import ptr_name
 
 _DEFAULT_TIMEOUT = 5.0
 
@@ -108,8 +109,16 @@ class DNSResolver:
         return self._query(name, "CAA")
 
     def resolve_ptr(self, name: str) -> list[DNSRecord]:
-        """Query a PTR name such as 4.4.8.8.in-addr.arpa (Phase 7 wraps IPs)."""
+        """Query a PTR name such as 4.4.8.8.in-addr.arpa."""
         return self._query(name, "PTR")
+
+    def resolve_reverse(self, ip: str) -> list[DNSRecord]:
+        """IP → hostname. NXDOMAIN means no PTR, not a fatal error."""
+        qname = ptr_name(ip)
+        try:
+            return self.resolve_ptr(qname)
+        except DomainNotFoundError:
+            return []
 
     def _query(self, name: str, record_type: str) -> list[DNSRecord]:
         """Ask the recursive resolver for one record type.

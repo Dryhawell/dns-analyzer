@@ -143,3 +143,30 @@ def test_cli_shows_section_timeout_not_empty(mock_resolver_cls, capsys) -> None:
     assert "93.184.216.34" in output
     assert "Error: DNS query timed out." in output
     assert "No CAA record found." not in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_reverse_prints_ptr(mock_resolver_cls, capsys) -> None:
+    mock_resolver_cls.return_value.resolve_reverse.return_value = [
+        DNSRecord("PTR", "8.8.8.8.in-addr.arpa", "dns.google", 86400),
+    ]
+
+    assert run(["--reverse", "8.8.8.8"]) == 0
+    output = capsys.readouterr().out
+    assert "REVERSE DNS" in output
+    assert "8.8.8.8" in output
+    assert "→ dns.google" in output
+    assert "8.8.8.8.in-addr.arpa" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_reverse_missing_ptr(mock_resolver_cls, capsys) -> None:
+    mock_resolver_cls.return_value.resolve_reverse.return_value = []
+
+    assert run(["--reverse", "203.0.113.1"]) == 0
+    assert "No PTR record found." in capsys.readouterr().out
+
+
+def test_cli_positional_ip_hints_reverse(capsys) -> None:
+    assert run(["8.8.8.8"]) == 1
+    assert "--reverse" in capsys.readouterr().err

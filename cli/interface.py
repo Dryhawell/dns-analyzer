@@ -1,7 +1,7 @@
 """CLI interface.
 
-Phase 6: A, AAAA, CNAME, MX, NS, TXT, SOA, and CAA records.
-Full flags (--record, --security, --all, --reverse) arrive in Phase 14.
+Phase 7: forward records plus --reverse PTR lookup.
+Full flags (--record, --security, --all) arrive in Phase 14.
 """
 
 from __future__ import annotations
@@ -9,10 +9,11 @@ from __future__ import annotations
 import argparse
 import sys
 
-from analyzer.exceptions import DNSQueryError
+from analyzer.exceptions import DNSQueryError, InvalidIPError
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
+from analyzer.reverse import looks_like_ip, parse_ip, ptr_name
 from analyzer.validator import DomainValidationError, normalize_domain
 
 _DEFAULT_TIMEOUT = 5.0
@@ -28,12 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dns-analyzer",
         description="Analyze DNS records and security signals for a domain.",
-        epilog="Phase 6 shows A, AAAA, CNAME, MX, NS, TXT, SOA, and CAA records.",
+        epilog="Forward lookup: python main.py example.com | Reverse: python main.py --reverse 8.8.8.8",
     )
     parser.add_argument(
         "domain",
         nargs="?",
         help="Domain name or URL (e.g. example.com or https://example.com/page)",
+    )
+    parser.add_argument(
+        "--reverse",
+        metavar="IP",
+        help="Reverse DNS (PTR) lookup for an IPv4 or IPv6 address",
     )
     parser.add_argument(
         "--timeout",
@@ -181,17 +187,76 @@ def _print_lookup(lookup: CoreLookup) -> None:
     _print_caa_section(lookup.caa, errors)
 
 
+def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
+    print("REVERSE DNS")
+    print("────────────────────────")
+    print()
+    print(ip)
+    print()
+    if not records:
+        print("No PTR record found.")
+        print()
+        print(f"Queried: {ptr_qname}")
+        return
+
+    for record in records:
+        print(f"→ {record.value}")
+        print(f"TTL: {record.ttl}")
+        print()
+    print(f"Queried: {ptr_qname}")
+
+
+def _run_reverse(ip_raw: str, timeout: float) -> int:
+    try:
+        addr = parse_ip(ip_raw)
+    except InvalidIPError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    ip_text = str(addr)
+    qname = ptr_name(ip_text)
+    resolver = DNSResolver(timeout=timeout)
+    try:
+        records = resolver.resolve_reverse(ip_text)
+    except DNSQueryError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    _print_reverse(ip_text, qname, records)
+    return 0
+
+
+def _print_usage() -> None:
+    print("DNS Analyzer — Phase 7 (PTR / Reverse DNS)")
+    print()
+    print("Usage: python main.py <domain>")
+    print("       python main.py --reverse <ip>")
+    print("Example: python main.py example.com")
+    print("Example: python main.py --reverse 8.8.8.8")
+
+
 def run(argv: list[str] | None = None) -> int:
     _ensure_utf8_stdout()
     args = build_parser().parse_args(argv)
 
+    if args.reverse and args.domain:
+        print("Error: Use either a domain or --reverse, not both.", file=sys.stderr)
+        return 1
+
+    if args.reverse:
+        return _run_reverse(args.reverse, args.timeout)
+
     if not args.domain:
-        print("DNS Analyzer — Phase 6 (TXT / SOA / CAA)")
-        print()
-        print("Usage: python main.py <domain>")
-        print("Example: python main.py example.com")
-        print("Example: python main.py example.com --timeout 3")
+        _print_usage()
         return 0
+
+    if looks_like_ip(args.domain):
+        print(
+            "Error: That looks like an IP address. Use --reverse "
+            f"{args.domain.strip()}",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         domain = normalize_domain(args.domain)

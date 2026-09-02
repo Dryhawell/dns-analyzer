@@ -38,3 +38,7 @@ class DNSResolutionError(DNSQueryError):
     """Catch-all for other dnspython DNS exceptions."""
 
     user_message = "DNS resolution error."
+
+
+class InvalidIPError(ValueError):
+    """Raised when --reverse input is not an IPv4 or IPv6 address."""
