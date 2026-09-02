@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 2 — domain validation. No DNS queries yet.
+> **Current status:** Phase 3 — DNS resolver architecture. A-record probe is enabled.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -65,23 +65,24 @@ pip install -r requirements.txt
 
 ## Usage
 
-Validate and normalize a domain (or a pasted URL):
-
 ```bash
 python main.py example.com
 python main.py https://example.com/login
+python main.py example.com --timeout 3
 python main.py --help
 ```
 
-Invalid input exits with code 1 and a clear error. Full analysis flags (`--security`, `--record`, `--reverse`) arrive in later phases.
+Phase 3 validates the input, then queries **A records** through the system resolver. Other record types exist on `DNSResolver` but are not printed yet.
+
+Invalid input or DNS failures (NXDOMAIN, timeout) exit with code 1 and a clear error.
 
 ## Testing
 
 ```bash
-python -m pytest tests/test_validator.py -q
+python -m pytest tests/ -q
 ```
 
-Validator tests do not touch the network.
+Validator, record-formatting, and resolver tests do not contact real nameservers. Resolver tests mock `dnspython`.
 
 ---
 
@@ -119,7 +120,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 3 — DNS resolver architecture**.
+See the phase plan in the project brief. Next: **Phase 4 — A / AAAA records**.
 
 ## License
 
