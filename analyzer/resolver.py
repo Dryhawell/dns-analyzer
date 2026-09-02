@@ -14,7 +14,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import dns.exception
+import dns.flags
 import dns.resolver
+
+from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 
 from analyzer.exceptions import (
     DNSQueryError,
@@ -119,6 +122,51 @@ class DNSResolver:
             return self.resolve_ptr(qname)
         except DomainNotFoundError:
             return []
+
+    def inspect_dnssec(self, name: str) -> DnssecObservation:
+        """Look for DNSKEY/DS and the AD flag. Failures become observations."""
+        client = dns.resolver.Resolver(configure=True)
+        client.timeout = self.timeout
+        client.lifetime = self.timeout
+        if self._client.nameservers:
+            client.nameservers = list(self._client.nameservers)
+        # DO bit: ask the resolver to include DNSSEC records when it can.
+        client.use_edns(0, dns.flags.DO, 1232)
+
+        errors: list[str] = []
+        dnskey_found, ad_key = self._dnssec_probe(client, name, "DNSKEY", errors)
+        ds_found, ad_ds = self._dnssec_probe(client, name, "DS", errors)
+        return evaluate_dnssec(
+            dnskey_found=dnskey_found,
+            ds_found=ds_found,
+            ad_flag=ad_key or ad_ds,
+            error="; ".join(errors) if errors else None,
+        )
+
+    def _dnssec_probe(
+        self,
+        client: dns.resolver.Resolver,
+        name: str,
+        rdtype: str,
+        errors: list[str],
+    ) -> tuple[bool, bool]:
+        try:
+            answer = client.resolve(name, rdtype, search=False)
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            return False, False
+        except (dns.resolver.LifetimeTimeout, dns.exception.Timeout):
+            errors.append(f"{rdtype} query timed out")
+            return False, False
+        except dns.resolver.NoNameservers:
+            errors.append(f"{rdtype} query had no nameservers")
+            return False, False
+        except dns.exception.DNSException:
+            errors.append(f"{rdtype} query failed")
+            return False, False
+
+        response = getattr(answer, "response", None)
+        ad_flag = bool(response is not None and (response.flags & dns.flags.AD))
+        return True, ad_flag
 
     def _query(self, name: str, record_type: str) -> list[DNSRecord]:
         """Ask the recursive resolver for one record type.

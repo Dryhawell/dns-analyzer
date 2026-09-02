@@ -1,7 +1,6 @@
 """CLI interface.
 
-Phase 7: forward records plus --reverse PTR lookup.
-Full flags (--record, --security, --all) arrive in Phase 14.
+Phase 9: forward records, reverse DNS, TTL summary, DNSSEC detection.
 """
 
 from __future__ import annotations
@@ -9,6 +8,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import DNSQueryError, InvalidIPError
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
@@ -204,7 +204,7 @@ def _print_ttl_summary(records: tuple[DNSRecord, ...]) -> None:
     print()
 
 
-def _print_lookup(lookup: CoreLookup) -> None:
+def _print_lookup(lookup: CoreLookup, dnssec: DnssecObservation) -> None:
     errors = lookup.errors
     _print_address_section("A RECORDS", "No A record found.", "A", lookup.a, errors)
     _print_address_section("AAAA RECORDS", "No AAAA record found.", "AAAA", lookup.aaaa, errors)
@@ -215,6 +215,21 @@ def _print_lookup(lookup: CoreLookup) -> None:
     _print_soa_section(lookup.soa, errors)
     _print_caa_section(lookup.caa, errors)
     _print_ttl_summary(lookup.all_records())
+    _print_dnssec(dnssec)
+
+
+def _print_dnssec(observation: DnssecObservation) -> None:
+    print("DNSSEC")
+    print("────────────────────────")
+    print(f"Status: {observation.status}")
+    print(f"DNSKEY: {'FOUND' if observation.dnskey_found else 'NOT FOUND'}")
+    print(f"DS:     {'FOUND' if observation.ds_found else 'NOT FOUND'}")
+    print(f"AD flag: {'SET' if observation.ad_flag else 'NOT SET'} (this resolver)")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
 
 
 def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
@@ -259,7 +274,7 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 8 (TTL analysis)")
+    print("DNS Analyzer — Phase 9 (DNSSEC)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py --reverse <ip>")
@@ -311,5 +326,6 @@ def run(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    _print_lookup(lookup)
+    dnssec = resolver.inspect_dnssec(domain)
+    _print_lookup(lookup, dnssec)
     return 0

@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 8 — TTL analysis (cache lifetime, not a security score).
+> **Current status:** Phase 9 — DNSSEC detection (observation, not a verdict).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -102,6 +102,18 @@ TTL (Time To Live) is how long a resolver may reuse an answer without asking aga
 
 A 60-second A record is not "insecure". An 86400-second NS record is not "secure". They are operational choices.
 
+## DNSSEC
+
+DNSSEC signs DNS data so a **validating resolver** can check integrity (the answer was not altered in transit) and authenticity (it came from the signed zone). It is a defense against **DNS spoofing**, not a proof that a website is safe.
+
+This tool reports:
+
+- **DNSKEY** — the zone publishes signing keys
+- **DS** — the parent zone has a hash of those keys (chain toward the root)
+- **AD flag** — whether *your* recursive resolver marked the answer as authenticated
+
+`DETECTED` means those signals were visible **to this resolver**. It is **not** a full validation against the IANA root key. `NOT DETECTED` does not mean the domain is compromised — many ISP resolvers hide DNSSEC records.
+
 ## Reverse DNS
 
 `python main.py --reverse 8.8.8.8` does **not** contact 8.8.8.8. It queries `8.8.8.8.in-addr.arpa` for a PTR record. Forward (name → IP) and reverse (IP → name) are separate zones; they do not have to match.
@@ -150,7 +162,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 9 — DNSSEC analysis**.
+See the phase plan in the project brief. Next: **Phase 10 — SPF analysis**.
 
 ## License
 

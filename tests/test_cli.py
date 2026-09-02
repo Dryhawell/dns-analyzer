@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from analyzer.dnssec import evaluate_dnssec
 from analyzer.models import CoreLookup, DNSRecord
 from cli.interface import run
 
@@ -30,11 +31,31 @@ def _lookup(
     )
 
 
+def _dnssec(
+    dnskey_found: bool = False,
+    ds_found: bool = False,
+    ad_flag: bool = False,
+):
+    return evaluate_dnssec(
+        dnskey_found=dnskey_found,
+        ds_found=ds_found,
+        ad_flag=ad_flag,
+    )
+
+
+def _bind(mock_cls, lookup: CoreLookup, dnssec=None) -> None:
+    mock_cls.return_value.lookup_core.return_value = lookup
+    mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
+
+
 @patch("cli.interface.DNSResolver")
 def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
-    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
-        a=[DNSRecord("A", "example.com", "93.184.216.34", 3600)],
-        aaaa=[DNSRecord("AAAA", "example.com", "2001:db8::1", 300)],
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 3600)],
+            aaaa=[DNSRecord("AAAA", "example.com", "2001:db8::1", 300)],
+        ),
     )
 
     assert run(["example.com"]) == 0
@@ -54,8 +75,9 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
 
 @patch("cli.interface.DNSResolver")
 def test_cli_missing_aaaa_is_not_an_error(mock_resolver_cls, capsys) -> None:
-    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
-        a=[DNSRecord("A", "example.com", "93.184.216.34", 3600)],
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 3600)]),
     )
 
     assert run(["example.com"]) == 0
@@ -65,8 +87,9 @@ def test_cli_missing_aaaa_is_not_an_error(mock_resolver_cls, capsys) -> None:
 
 @patch("cli.interface.DNSResolver")
 def test_cli_notes_private_scope(mock_resolver_cls, capsys) -> None:
-    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
-        a=[DNSRecord("A", "intranet.example", "10.0.0.5", 60)],
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "intranet.example", "10.0.0.5", 60)]),
     )
 
     assert run(["intranet.example"]) == 0
@@ -75,16 +98,19 @@ def test_cli_notes_private_scope(mock_resolver_cls, capsys) -> None:
 
 @patch("cli.interface.DNSResolver")
 def test_cli_prints_cname_mx_ns(mock_resolver_cls, capsys) -> None:
-    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
-        cname=[DNSRecord("CNAME", "www.example.com", "example.com", 600)],
-        mx=[
-            DNSRecord("MX", "example.com", "mail-b.example.com", 3600, priority=20),
-            DNSRecord("MX", "example.com", "mail-a.example.com", 3600, priority=10),
-        ],
-        ns=[
-            DNSRecord("NS", "example.com", "ns2.example.com", 86400),
-            DNSRecord("NS", "example.com", "ns1.example.com", 86400),
-        ],
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            cname=[DNSRecord("CNAME", "www.example.com", "example.com", 600)],
+            mx=[
+                DNSRecord("MX", "example.com", "mail-b.example.com", 3600, priority=20),
+                DNSRecord("MX", "example.com", "mail-a.example.com", 3600, priority=10),
+            ],
+            ns=[
+                DNSRecord("NS", "example.com", "ns2.example.com", 86400),
+                DNSRecord("NS", "example.com", "ns1.example.com", 86400),
+            ],
+        ),
     )
 
     assert run(["www.example.com"]) == 0
@@ -99,30 +125,33 @@ def test_cli_prints_cname_mx_ns(mock_resolver_cls, capsys) -> None:
 
 @patch("cli.interface.DNSResolver")
 def test_cli_prints_txt_soa_caa(mock_resolver_cls, capsys) -> None:
-    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
-        txt=[DNSRecord("TXT", "example.com", "v=spf1 -all", 300)],
-        soa=[
-            DNSRecord(
-                "SOA",
-                "example.com",
-                "ns1.example.com serial=2026090201",
-                60,
-                details=(
-                    ("Primary NS", "ns1.example.com"),
-                    ("Mailbox", "hostmaster.example.com"),
-                    ("Serial", "2026090201"),
-                ),
-            )
-        ],
-        caa=[
-            DNSRecord(
-                "CAA",
-                "example.com",
-                '0 issue "letsencrypt.org"',
-                3600,
-                details=(("Tag", "issue — allows this CA to issue certificates"),),
-            )
-        ],
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            txt=[DNSRecord("TXT", "example.com", "v=spf1 -all", 300)],
+            soa=[
+                DNSRecord(
+                    "SOA",
+                    "example.com",
+                    "ns1.example.com serial=2026090201",
+                    60,
+                    details=(
+                        ("Primary NS", "ns1.example.com"),
+                        ("Mailbox", "hostmaster.example.com"),
+                        ("Serial", "2026090201"),
+                    ),
+                )
+            ],
+            caa=[
+                DNSRecord(
+                    "CAA",
+                    "example.com",
+                    '0 issue "letsencrypt.org"',
+                    3600,
+                    details=(("Tag", "issue — allows this CA to issue certificates"),),
+                )
+            ],
+        ),
     )
 
     assert run(["example.com"]) == 0
@@ -136,9 +165,12 @@ def test_cli_prints_txt_soa_caa(mock_resolver_cls, capsys) -> None:
 
 @patch("cli.interface.DNSResolver")
 def test_cli_shows_section_timeout_not_empty(mock_resolver_cls, capsys) -> None:
-    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
-        a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
-        errors=(("CAA", "DNS query timed out."),),
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+            errors=(("CAA", "DNS query timed out."),),
+        ),
     )
 
     assert run(["example.com"]) == 0
@@ -173,3 +205,22 @@ def test_cli_reverse_missing_ptr(mock_resolver_cls, capsys) -> None:
 def test_cli_positional_ip_hints_reverse(capsys) -> None:
     assert run(["8.8.8.8"]) == 1
     assert "--reverse" in capsys.readouterr().err
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_prints_dnssec_detected(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        dnssec=_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "DNSSEC" in output
+    assert "Status: DETECTED" in output
+    assert "DNSKEY: FOUND" in output
+    assert "DS:     FOUND" in output
+    assert "AD flag: SET" in output
+    assert "does not mean the domain is compromised" in output
+    assert "strip DNSKEY" in output

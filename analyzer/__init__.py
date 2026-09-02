@@ -1,5 +1,6 @@
 """Core DNS analysis package."""
 
+from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
     DNSQueryError,
     DNSResolutionError,
@@ -14,6 +15,7 @@ from analyzer.reverse import looks_like_ip, ptr_name
 from analyzer.validator import DomainValidationError, is_valid_domain, normalize_domain
 
 __all__ = [
+    "DnssecObservation",
     "CoreLookup",
     "DNSQueryError",
     "DNSRecord",
