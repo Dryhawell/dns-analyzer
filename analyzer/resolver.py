@@ -17,6 +17,7 @@ import dns.exception
 import dns.resolver
 
 from analyzer.exceptions import (
+    DNSQueryError,
     DNSResolutionError,
     DNSTimeoutError,
     DomainNotFoundError,
@@ -55,14 +56,37 @@ class DNSResolver:
         return self.resolve_a(name), self.resolve_aaaa(name)
 
     def lookup_core(self, name: str) -> CoreLookup:
-        """A / AAAA / CNAME / MX / NS for one hostname."""
-        ipv4, ipv6 = self.resolve_addresses(name)
+        """Query core record types. A NXDOMAIN/timeout still aborts.
+
+        Later types (AAAA, CNAME, MX, ...) collect errors instead of
+        discarding the whole result — CAA timeouts are common on some resolvers.
+        """
+        errors: list[tuple[str, str]] = []
+
+        def collect(label: str, query) -> tuple[DNSRecord, ...]:
+            try:
+                return tuple(query())
+            except DomainNotFoundError:
+                if label == "A":
+                    raise
+                errors.append((label, "Domain does not exist."))
+                return ()
+            except DNSQueryError as exc:
+                if label == "A":
+                    raise
+                errors.append((label, str(exc)))
+                return ()
+
         return CoreLookup(
-            a=tuple(ipv4),
-            aaaa=tuple(ipv6),
-            cname=tuple(self.resolve_cname(name)),
-            mx=tuple(self.resolve_mx(name)),
-            ns=tuple(self.resolve_ns(name)),
+            a=collect("A", lambda: self.resolve_a(name)),
+            aaaa=collect("AAAA", lambda: self.resolve_aaaa(name)),
+            cname=collect("CNAME", lambda: self.resolve_cname(name)),
+            mx=collect("MX", lambda: self.resolve_mx(name)),
+            ns=collect("NS", lambda: self.resolve_ns(name)),
+            txt=collect("TXT", lambda: self.resolve_txt(name)),
+            soa=collect("SOA", lambda: self.resolve_soa(name)),
+            caa=collect("CAA", lambda: self.resolve_caa(name)),
+            errors=tuple(errors),
         )
 
     def resolve_cname(self, name: str) -> list[DNSRecord]:

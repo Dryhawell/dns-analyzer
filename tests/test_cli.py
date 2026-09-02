@@ -12,6 +12,10 @@ def _lookup(
     cname: list[DNSRecord] | None = None,
     mx: list[DNSRecord] | None = None,
     ns: list[DNSRecord] | None = None,
+    txt: list[DNSRecord] | None = None,
+    soa: list[DNSRecord] | None = None,
+    caa: list[DNSRecord] | None = None,
+    errors: tuple[tuple[str, str], ...] = (),
 ) -> CoreLookup:
     return CoreLookup(
         a=tuple(a or []),
@@ -19,6 +23,10 @@ def _lookup(
         cname=tuple(cname or []),
         mx=tuple(mx or []),
         ns=tuple(ns or []),
+        txt=tuple(txt or []),
+        soa=tuple(soa or []),
+        caa=tuple(caa or []),
+        errors=errors,
     )
 
 
@@ -84,3 +92,54 @@ def test_cli_prints_cname_mx_ns(mock_resolver_cls, capsys) -> None:
     assert "Priority: 10" in output
     assert "Priority: 20" in output
     assert output.find("ns1.example.com") < output.find("ns2.example.com")
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_prints_txt_soa_caa(mock_resolver_cls, capsys) -> None:
+    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
+        txt=[DNSRecord("TXT", "example.com", "v=spf1 -all", 300)],
+        soa=[
+            DNSRecord(
+                "SOA",
+                "example.com",
+                "ns1.example.com serial=2026090201",
+                60,
+                details=(
+                    ("Primary NS", "ns1.example.com"),
+                    ("Mailbox", "hostmaster.example.com"),
+                    ("Serial", "2026090201"),
+                ),
+            )
+        ],
+        caa=[
+            DNSRecord(
+                "CAA",
+                "example.com",
+                '0 issue "letsencrypt.org"',
+                3600,
+                details=(("Tag", "issue — allows this CA to issue certificates"),),
+            )
+        ],
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert '"v=spf1 -all"' in output
+    assert "Primary NS: ns1.example.com" in output
+    assert "Serial: 2026090201" in output
+    assert '0 issue "letsencrypt.org"' in output
+    assert "No CAA record found." not in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_shows_section_timeout_not_empty(mock_resolver_cls, capsys) -> None:
+    mock_resolver_cls.return_value.lookup_core.return_value = _lookup(
+        a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+        errors=(("CAA", "DNS query timed out."),),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "93.184.216.34" in output
+    assert "Error: DNS query timed out." in output
+    assert "No CAA record found." not in output

@@ -1,6 +1,6 @@
 """Tests for rdata formatting. No network access."""
 
-from analyzer.records import describe_ip_scope, format_rdata
+from analyzer.records import describe_ip_scope, format_rdata, records_from_answer
 
 
 class DummyRdata:
@@ -43,11 +43,21 @@ def test_caa_quotes_value() -> None:
     assert format_rdata("CAA", rdata) == '0 issue "letsencrypt.org"'
 
 
-def test_soa_includes_serial() -> None:
+def test_soa_details_include_mailbox_and_timers() -> None:
     rdata = DummyRdata(
         "unused",
         mname="ns1.example.com.",
         rname="hostmaster.example.com.",
         serial=2026090201,
+        refresh=7200,
+        retry=1800,
+        expire=1209600,
+        minimum=3600,
     )
-    assert format_rdata("SOA", rdata) == "ns1.example.com hostmaster.example.com serial=2026090201"
+    assert format_rdata("SOA", rdata) == "ns1.example.com serial=2026090201"
+    records = records_from_answer("SOA", "example.com", [rdata])
+    details = dict(records[0].details)
+    assert details["Primary NS"] == "ns1.example.com"
+    assert details["Mailbox"] == "hostmaster.example.com"
+    assert details["Serial"] == "2026090201"
+    assert details["Refresh"] == "7200"

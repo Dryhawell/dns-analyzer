@@ -18,14 +18,19 @@ class DNSRecord:
     value: str
     ttl: int
     priority: int | None = None
+    details: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
 class CoreLookup:
-    """A, AAAA, CNAME, MX and NS for one name (Phase 5)."""
+    """A, AAAA, CNAME, MX, NS, TXT, SOA and CAA for one name."""
 
     a: tuple[DNSRecord, ...]
     aaaa: tuple[DNSRecord, ...]
     cname: tuple[DNSRecord, ...]
     mx: tuple[DNSRecord, ...]
     ns: tuple[DNSRecord, ...]
+    txt: tuple[DNSRecord, ...]
+    soa: tuple[DNSRecord, ...]
+    caa: tuple[DNSRecord, ...]
+    errors: tuple[tuple[str, str], ...] = ()

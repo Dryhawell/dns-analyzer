@@ -88,6 +88,20 @@ def test_lookup_core_queries_cname_mx_ns(resolver: DNSResolver) -> None:
         _answer(DummyRdata("target.example.net.")),
         _answer(DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")),
         _answer(DummyRdata("ns1.example.com.")),
+        _answer(DummyRdata("ignored", strings=(b"v=spf1 -all",))),
+        _answer(
+            DummyRdata(
+                "unused",
+                mname="ns1.example.com.",
+                rname="hostmaster.example.com.",
+                serial=1,
+                refresh=1,
+                retry=1,
+                expire=1,
+                minimum=1,
+            )
+        ),
+        _answer(DummyRdata("unused", flags=0, tag="issue", value="letsencrypt.org")),
     ]
 
     lookup = resolver.lookup_core("www.example.com")
@@ -98,8 +112,30 @@ def test_lookup_core_queries_cname_mx_ns(resolver: DNSResolver) -> None:
     assert lookup.mx[0].value == "mail.example.com"
     assert lookup.mx[0].priority == 10
     assert lookup.ns[0].value == "ns1.example.com"
+    assert lookup.txt[0].value == "v=spf1 -all"
+    assert lookup.soa[0].details[0][1] == "ns1.example.com"
+    assert lookup.caa[0].value == '0 issue "letsencrypt.org"'
     queried_types = [call.args[1] for call in resolver._client.resolve.call_args_list]
-    assert queried_types == ["A", "AAAA", "CNAME", "MX", "NS"]
+    assert queried_types == ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA"]
+
+
+def test_lookup_core_keeps_results_if_caa_times_out(resolver: DNSResolver) -> None:
+    resolver._client.resolve.side_effect = [
+        _answer(DummyRdata("93.184.216.34")),
+        _answer(),
+        _answer(),
+        _answer(),
+        _answer(),
+        _answer(),
+        _answer(),
+        dns.exception.Timeout(),
+    ]
+
+    lookup = resolver.lookup_core("example.com")
+
+    assert lookup.a[0].value == "93.184.216.34"
+    assert lookup.caa == ()
+    assert lookup.errors == (("CAA", "DNS query timed out."),)
 
 
 def test_resolve_mx_includes_preference(resolver: DNSResolver) -> None:

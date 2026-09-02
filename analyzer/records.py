@@ -33,9 +33,8 @@ def format_rdata(record_type: str, rdata: object) -> str:
 
     if rtype == "SOA":
         mname = _text(getattr(rdata, "mname", ""))
-        rname = _text(getattr(rdata, "rname", ""))
         serial = getattr(rdata, "serial", "")
-        return f"{mname} {rname} serial={serial}"
+        return f"{mname} serial={serial}"
 
     if rtype == "CAA":
         flags = getattr(rdata, "flags", "")
@@ -66,9 +65,37 @@ def records_from_answer(record_type: str, queried_name: str, answer: object) -> 
                 value=format_rdata(record_type, rdata),
                 ttl=ttl,
                 priority=_mx_priority(record_type, rdata),
+                details=_record_details(record_type, rdata),
             )
         )
     return records
+
+
+def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], ...]:
+    rtype = record_type.upper()
+    if rtype == "SOA":
+        return (
+            ("Primary NS", _text(getattr(rdata, "mname", ""))),
+            ("Mailbox", _text(getattr(rdata, "rname", ""))),
+            ("Serial", str(getattr(rdata, "serial", ""))),
+            ("Refresh", str(getattr(rdata, "refresh", ""))),
+            ("Retry", str(getattr(rdata, "retry", ""))),
+            ("Expire", str(getattr(rdata, "expire", ""))),
+            ("Minimum", str(getattr(rdata, "minimum", ""))),
+        )
+    if rtype == "CAA":
+        tag = getattr(rdata, "tag", "")
+        if isinstance(tag, bytes):
+            tag = tag.decode("ascii", errors="replace")
+        meaning = {
+            "issue": "allows this CA to issue certificates",
+            "issuewild": "allows this CA to issue wildcard certificates",
+            "iodef": "incident report URI",
+        }.get(str(tag), "")
+        if meaning:
+            return (("Tag", f"{tag} — {meaning}"),)
+        return ()
+    return ()
 
 
 def _mx_priority(record_type: str, rdata: object) -> int | None:

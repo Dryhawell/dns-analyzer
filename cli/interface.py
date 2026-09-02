@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 5: A, AAAA, CNAME, MX, and NS records.
+Phase 6: A, AAAA, CNAME, MX, NS, TXT, SOA, and CAA records.
 Full flags (--record, --security, --all, --reverse) arrive in Phase 14.
 """
 
@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dns-analyzer",
         description="Analyze DNS records and security signals for a domain.",
-        epilog="Phase 5 shows A, AAAA, CNAME, MX, and NS records.",
+        epilog="Phase 6 shows A, AAAA, CNAME, MX, NS, TXT, SOA, and CAA records.",
     )
     parser.add_argument(
         "domain",
@@ -45,11 +45,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_address_section(title: str, empty_message: str, records: tuple[DNSRecord, ...]) -> None:
+def _print_missing(empty_message: str, section: str, errors: tuple[tuple[str, str], ...]) -> None:
+    for label, message in errors:
+        if label == section:
+            print(f"Error: {message}")
+            print()
+            return
+    print(empty_message)
+    print()
+
+
+def _print_address_section(
+    title: str,
+    empty_message: str,
+    section: str,
+    records: tuple[DNSRecord, ...],
+    errors: tuple[tuple[str, str], ...],
+) -> None:
     print(title)
     if not records:
-        print(empty_message)
-        print()
+        _print_missing(empty_message, section, errors)
         return
 
     for record in records:
@@ -61,11 +76,12 @@ def _print_address_section(title: str, empty_message: str, records: tuple[DNSRec
         print()
 
 
-def _print_cname_section(records: tuple[DNSRecord, ...]) -> None:
+def _print_cname_section(
+    records: tuple[DNSRecord, ...], errors: tuple[tuple[str, str], ...]
+) -> None:
     print("CNAME RECORDS")
     if not records:
-        print("No CNAME record found.")
-        print()
+        _print_missing("No CNAME record found.", "CNAME", errors)
         return
 
     for record in records:
@@ -74,11 +90,12 @@ def _print_cname_section(records: tuple[DNSRecord, ...]) -> None:
         print()
 
 
-def _print_mx_section(records: tuple[DNSRecord, ...]) -> None:
+def _print_mx_section(
+    records: tuple[DNSRecord, ...], errors: tuple[tuple[str, str], ...]
+) -> None:
     print("MX RECORDS")
     if not records:
-        print("No MX record found.")
-        print()
+        _print_missing("No MX record found.", "MX", errors)
         return
 
     ordered = sorted(
@@ -93,11 +110,12 @@ def _print_mx_section(records: tuple[DNSRecord, ...]) -> None:
         print()
 
 
-def _print_ns_section(records: tuple[DNSRecord, ...]) -> None:
+def _print_ns_section(
+    records: tuple[DNSRecord, ...], errors: tuple[tuple[str, str], ...]
+) -> None:
     print("NS RECORDS")
     if not records:
-        print("No NS record found.")
-        print()
+        _print_missing("No NS record found.", "NS", errors)
         return
 
     for record in sorted(records, key=lambda item: item.value):
@@ -106,12 +124,61 @@ def _print_ns_section(records: tuple[DNSRecord, ...]) -> None:
         print()
 
 
+def _print_txt_section(
+    records: tuple[DNSRecord, ...], errors: tuple[tuple[str, str], ...]
+) -> None:
+    print("TXT RECORDS")
+    if not records:
+        _print_missing("No TXT record found.", "TXT", errors)
+        return
+
+    for record in records:
+        print(f'"{record.value}"')
+        print(f"TTL: {record.ttl}")
+        print()
+
+
+def _print_soa_section(
+    records: tuple[DNSRecord, ...], errors: tuple[tuple[str, str], ...]
+) -> None:
+    print("SOA")
+    if not records:
+        _print_missing("No SOA record found.", "SOA", errors)
+        return
+
+    for record in records:
+        for label, value in record.details:
+            print(f"{label}: {value}")
+        print(f"TTL: {record.ttl}")
+        print()
+
+
+def _print_caa_section(
+    records: tuple[DNSRecord, ...], errors: tuple[tuple[str, str], ...]
+) -> None:
+    print("CAA RECORDS")
+    if not records:
+        _print_missing("No CAA record found.", "CAA", errors)
+        return
+
+    for record in records:
+        print(record.value)
+        for label, value in record.details:
+            print(f"{label}: {value}")
+        print(f"TTL: {record.ttl}")
+        print()
+
+
 def _print_lookup(lookup: CoreLookup) -> None:
-    _print_address_section("A RECORDS", "No A record found.", lookup.a)
-    _print_address_section("AAAA RECORDS", "No AAAA record found.", lookup.aaaa)
-    _print_cname_section(lookup.cname)
-    _print_mx_section(lookup.mx)
-    _print_ns_section(lookup.ns)
+    errors = lookup.errors
+    _print_address_section("A RECORDS", "No A record found.", "A", lookup.a, errors)
+    _print_address_section("AAAA RECORDS", "No AAAA record found.", "AAAA", lookup.aaaa, errors)
+    _print_cname_section(lookup.cname, errors)
+    _print_mx_section(lookup.mx, errors)
+    _print_ns_section(lookup.ns, errors)
+    _print_txt_section(lookup.txt, errors)
+    _print_soa_section(lookup.soa, errors)
+    _print_caa_section(lookup.caa, errors)
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -119,7 +186,7 @@ def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if not args.domain:
-        print("DNS Analyzer — Phase 5 (CNAME / MX / NS)")
+        print("DNS Analyzer — Phase 6 (TXT / SOA / CAA)")
         print()
         print("Usage: python main.py <domain>")
         print("Example: python main.py example.com")
