@@ -1,6 +1,6 @@
 """Tests for rdata formatting. No network access."""
 
-from analyzer.records import format_rdata
+from analyzer.records import describe_ip_scope, format_rdata
 
 
 class DummyRdata:
@@ -13,8 +13,20 @@ class DummyRdata:
         return self._text
 
 
-def test_a_record_strips_nothing_extra() -> None:
-    assert format_rdata("A", DummyRdata("93.184.216.34")) == "93.184.216.34"
+def test_aaaa_compresses_ipv6() -> None:
+    expanded = DummyRdata("2001:0db8:0000:0000:0000:0000:0000:0001")
+    assert format_rdata("AAAA", expanded) == "2001:db8::1"
+
+
+def test_describe_ip_scope_global_is_silent() -> None:
+    assert describe_ip_scope("93.184.216.34") is None
+    assert describe_ip_scope("2001:db8::1") == "private"
+
+
+def test_describe_ip_scope_loopback_and_private() -> None:
+    assert describe_ip_scope("127.0.0.1") == "loopback"
+    assert describe_ip_scope("192.168.0.1") == "private"
+    assert describe_ip_scope("::1") == "loopback"
 
 
 def test_ns_strips_trailing_dot() -> None:

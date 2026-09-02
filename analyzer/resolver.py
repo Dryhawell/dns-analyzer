@@ -50,6 +50,10 @@ class DNSResolver:
     def resolve_aaaa(self, name: str) -> list[DNSRecord]:
         return self._query(name, "AAAA")
 
+    def resolve_addresses(self, name: str) -> tuple[list[DNSRecord], list[DNSRecord]]:
+        """Query A then AAAA. NXDOMAIN on A stops the pair (name does not exist)."""
+        return self.resolve_a(name), self.resolve_aaaa(name)
+
     def resolve_cname(self, name: str) -> list[DNSRecord]:
         return self._query(name, "CNAME")
 

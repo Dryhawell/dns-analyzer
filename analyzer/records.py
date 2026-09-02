@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+
 from analyzer.models import DNSRecord
 
 
@@ -49,6 +51,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
             value = value.decode("utf-8", errors="replace")
         return f'{flags} {tag} "{value}"'
 
+    if rtype in {"A", "AAAA"}:
+        return canonicalize_ip(_text(rdata))
+
     return _text(rdata)
 
 
@@ -67,6 +72,39 @@ def records_from_answer(record_type: str, queried_name: str, answer: object) -> 
             )
         )
     return records
+
+
+def canonicalize_ip(value: str) -> str:
+    """Normalize A/AAAA rdata (compress IPv6, keep dotted IPv4)."""
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return value
+
+
+def describe_ip_scope(value: str) -> str | None:
+    """Return a non-global scope label, or None for typical public unicast.
+
+    Missing AAAA or a private address is an observation, not a verdict.
+    """
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return "invalid"
+
+    if addr.is_loopback:
+        return "loopback"
+    if addr.is_link_local:
+        return "link-local"
+    if addr.is_unspecified:
+        return "unspecified"
+    if addr.is_multicast:
+        return "multicast"
+    if addr.is_private:
+        return "private"
+    if addr.is_reserved:
+        return "reserved"
+    return None
 
 
 def _text(value: object) -> str:

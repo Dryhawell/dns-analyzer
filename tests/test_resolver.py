@@ -55,6 +55,32 @@ def test_resolve_a_returns_records(resolver: DNSResolver) -> None:
     resolver._client.resolve.assert_called_once_with("example.com", "A", search=False)
 
 
+def test_resolve_aaaa_returns_records(resolver: DNSResolver) -> None:
+    resolver._client.resolve.return_value = _answer(
+        DummyRdata("2001:0db8:0000:0000:0000:0000:0000:0001")
+    )
+
+    records = resolver.resolve_aaaa("example.com")
+
+    assert records[0].record_type == "AAAA"
+    assert records[0].value == "2001:db8::1"
+    resolver._client.resolve.assert_called_once_with("example.com", "AAAA", search=False)
+
+
+def test_resolve_addresses_queries_a_then_aaaa(resolver: DNSResolver) -> None:
+    resolver._client.resolve.side_effect = [
+        _answer(DummyRdata("93.184.216.34")),
+        _answer(DummyRdata("2001:db8::1")),
+    ]
+
+    ipv4, ipv6 = resolver.resolve_addresses("example.com")
+
+    assert ipv4[0].value == "93.184.216.34"
+    assert ipv6[0].value == "2001:db8::1"
+    assert resolver._client.resolve.call_args_list[0].args[1] == "A"
+    assert resolver._client.resolve.call_args_list[1].args[1] == "AAAA"
+
+
 def test_resolve_mx_includes_preference(resolver: DNSResolver) -> None:
     rdata = DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")
     resolver._client.resolve.return_value = _answer(rdata)

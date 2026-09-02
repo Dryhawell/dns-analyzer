@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 3 — DNS resolver architecture. A-record probe is enabled.
+> **Current status:** Phase 4 — A (IPv4) and AAAA (IPv6) records.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -72,9 +72,18 @@ python main.py example.com --timeout 3
 python main.py --help
 ```
 
-Phase 3 validates the input, then queries **A records** through the system resolver. Other record types exist on `DNSResolver` but are not printed yet.
+Phase 4 validates the input, then queries **A** (IPv4) and **AAAA** (IPv6) records. A missing AAAA record is displayed as an observation, not an error.
 
 Invalid input or DNS failures (NXDOMAIN, timeout) exit with code 1 and a clear error.
+
+## DNS Record Types (so far)
+
+| Type | Meaning | Missing means |
+| --- | --- | --- |
+| **A** | Hostname → IPv4 address | This name has no IPv4 mapping (it may still have AAAA) |
+| **AAAA** | Hostname → IPv6 address | This name has no IPv6 mapping (very common; not a vulnerability) |
+
+TTL is shown next to each record. It is a cache lifetime, not a security score.
 
 ## Testing
 
@@ -120,7 +129,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 4 — A / AAAA records**.
+See the phase plan in the project brief. Next: **Phase 5 — CNAME / MX / NS records**.
 
 ## License
 

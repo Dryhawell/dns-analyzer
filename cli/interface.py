@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 3: validate input, then probe A records through DNSResolver.
+Phase 4: validate input, then show A (IPv4) and AAAA (IPv6) records.
 Full flags (--record, --security, --all, --reverse) arrive in Phase 14.
 """
 
@@ -10,6 +10,8 @@ import argparse
 import sys
 
 from analyzer.exceptions import DNSQueryError
+from analyzer.models import DNSRecord
+from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
 from analyzer.validator import DomainValidationError, normalize_domain
 
@@ -26,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dns-analyzer",
         description="Analyze DNS records and security signals for a domain.",
-        epilog="Phase 3 probes A records via the system resolver. More record types follow.",
+        epilog="Phase 4 shows A and AAAA records. More types follow in later phases.",
     )
     parser.add_argument(
         "domain",
@@ -43,12 +45,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_address_section(title: str, empty_message: str, records: list[DNSRecord]) -> None:
+    print(title)
+    if not records:
+        print(empty_message)
+        print()
+        return
+
+    for record in records:
+        print(record.value)
+        print(f"TTL: {record.ttl}")
+        scope = describe_ip_scope(record.value)
+        if scope:
+            print(f"Scope: {scope}")
+        print()
+
+
 def run(argv: list[str] | None = None) -> int:
     _ensure_utf8_stdout()
     args = build_parser().parse_args(argv)
 
     if not args.domain:
-        print("DNS Analyzer — Phase 3 (DNS resolver)")
+        print("DNS Analyzer — Phase 4 (A / AAAA records)")
         print()
         print("Usage: python main.py <domain>")
         print("Example: python main.py example.com")
@@ -71,17 +89,11 @@ def run(argv: list[str] | None = None) -> int:
     resolver = DNSResolver(timeout=args.timeout)
 
     try:
-        records = resolver.resolve_a(domain)
+        a_records, aaaa_records = resolver.resolve_addresses(domain)
     except DNSQueryError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print("A RECORDS")
-    if not records:
-        print("No A record found.")
-        return 0
-
-    for record in records:
-        print(record.value)
-        print(f"TTL: {record.ttl}")
+    _print_address_section("A RECORDS", "No A record found.", a_records)
+    _print_address_section("AAAA RECORDS", "No AAAA record found.", aaaa_records)
     return 0
