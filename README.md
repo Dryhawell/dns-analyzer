@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 14 — CLI modes (`--record`, `--security`, `--all`).
+> **Current status:** Phase 15 — JSON / CSV export (`--format`, `--output`).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -73,8 +73,10 @@ python main.py example.com --record MX --record NS
 python main.py example.com --security
 python main.py https://example.com/login
 python main.py example.com --timeout 3
-python main.py --reverse 8.8.8.8
-python main.py --help
+python main.py example.com --format json
+python main.py example.com --output reports/example_com.json
+python main.py example.com --format csv --output reports/example_com.csv
+python main.py --reverse 8.8.8.8 --format json
 ```
 
 | Mode | What you get |
@@ -84,8 +86,12 @@ python main.py --help
 | `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump |
 | `--record A --security` | That type plus the security sections |
 | `--reverse IP` | PTR only |
+| `--format json` / `csv` | Machine-readable stdout (no human dump) |
+| `--output PATH` | Write `.json` or `.csv`; with default text mode the human report still prints |
 
-Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability. `--output` / `--format` are not in this phase (JSON/CSV comes next).
+Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
+
+JSON includes `schema` (`dns-analyzer.report.v1`), `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). CSV is a flat table: `record_type,name,value,ttl,priority`. `--record A` still **collects** all core types (so JSON is complete); it only **hides** other sections on the terminal.
 
 Invalid input or DNS failures (NXDOMAIN on a domain, timeout) exit with code 1 and a clear error.
 
@@ -175,6 +181,21 @@ Examples from the current weights:
 
 A clean published set (DNSSEC visible, SPF `-all`, DMARC `p=reject`, CAA present, public A) scores **0**.
 
+## JSON / CSV
+
+Reports are for other programs, not for humans scraping the terminal.
+
+```bash
+python main.py example.com --format json
+python main.py example.com --output reports/example_com.json
+```
+
+- **`--format json`** — JSON on stdout (no CLI dump). Pipe into `jq` or another tool.
+- **`--output file.json`** — write the file; default text mode still prints the human report.
+- **CSV** — one row per record (`record_type,name,value,ttl,priority`). Findings and the risk score are JSON-only.
+
+`scan_time` is UTC. `duration_ms` covers DNS queries for that run, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
+
 ## Reverse DNS
 
 `python main.py --reverse 8.8.8.8` does **not** contact 8.8.8.8. It queries `8.8.8.8.in-addr.arpa` for a PTR record. Forward (name → IP) and reverse (IP → name) are separate zones; they do not have to match.
@@ -224,7 +245,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 15 — JSON / CSV reporting**.
+See the phase plan in the project brief. Next: **Phase 16 — Logging**.
 
 ## License
 

@@ -12,6 +12,7 @@ from analyzer.exceptions import (
 )
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.resolver import DNSResolver
+from analyzer.result import DNSAnalysisResult
 from analyzer.reverse import looks_like_ip, ptr_name
 from analyzer.risk import RiskScore, score_risk
 from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
@@ -23,6 +24,7 @@ __all__ = [
     "CoreLookup",
     "DNSQueryError",
     "DNSRecord",
+    "DNSAnalysisResult",
     "DNSResolutionError",
     "DNSResolver",
     "DNSTimeoutError",

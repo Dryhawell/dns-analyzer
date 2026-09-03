@@ -1,13 +1,16 @@
 """CLI interface.
 
-Phase 14: --record, --security, --all. Default is the full report.
+Phase 15: --format json|csv|text and --output PATH.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
@@ -15,12 +18,19 @@ from analyzer.exceptions import DNSQueryError, InvalidIPError
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
+from analyzer.result import DNSAnalysisResult
 from analyzer.reverse import looks_like_ip, parse_ip, ptr_name
 from analyzer.risk import RiskScore
 from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
+from utils.reporter import (
+    dumps_csv,
+    dumps_json,
+    format_from_suffix,
+    write_report,
+)
 
 _DEFAULT_TIMEOUT = 5.0
 _RECORD_ORDER = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
@@ -32,8 +42,9 @@ Examples:
   python main.py example.com --record A
   python main.py example.com --record MX --record NS
   python main.py example.com --security
-  python main.py example.com --all
-  python main.py --reverse 8.8.8.8
+  python main.py example.com --format json
+  python main.py example.com --output reports/example_com.json
+  python main.py --reverse 8.8.8.8 --format csv
 
 Default (no --record / --security) is the same as --all: every record
 type plus DNSSEC, SPF, DMARC, findings, and the local risk score.
@@ -53,6 +64,15 @@ class ReportView:
 
     record_types: frozenset[str] | None
     show_security: bool
+
+
+@dataclass(frozen=True)
+class ExportPlan:
+    """Human stdout vs machine export (JSON/CSV)."""
+
+    print_human: bool
+    file_format: str | None
+    path: Path | None
 
 
 def _ensure_utf8_stdout() -> None:
@@ -108,6 +128,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help=f"DNS query timeout in seconds (default: {_DEFAULT_TIMEOUT})",
     )
+    parser.add_argument(
+        "--format",
+        choices=("text", "json", "csv"),
+        default="text",
+        dest="export_format",
+        help="text (default CLI), json, or csv. json/csv go to stdout unless --output is set",
+    )
+    parser.add_argument(
+        "--output",
+        metavar="PATH",
+        help="Write JSON or CSV to this path. With --format text, suffix must be .json or .csv",
+    )
     return parser
 
 
@@ -150,6 +182,51 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
     if has_filter:
         return ReportView(record_types=frozenset(selected), show_security=False)
     return ReportView(record_types=frozenset(), show_security=True)
+
+
+def plan_export(export_format: str, output: str | None) -> ExportPlan | str:
+    """Decide human vs JSON/CSV stdout vs file. Returns an error string on conflict."""
+    if export_format == "text":
+        if not output:
+            return ExportPlan(print_human=True, file_format=None, path=None)
+        path = Path(output)
+        inferred = format_from_suffix(path)
+        if inferred is None:
+            return (
+                "When using --output in text mode, the path must end in .json or .csv "
+                "(or pass --format json / --format csv)."
+            )
+        return ExportPlan(print_human=True, file_format=inferred, path=path)
+
+    if output:
+        path = Path(output)
+        inferred = format_from_suffix(path)
+        if inferred is not None and inferred != export_format:
+            return f"--format {export_format} does not match output suffix {path.suffix}."
+        return ExportPlan(print_human=False, file_format=export_format, path=path)
+    return ExportPlan(print_human=False, file_format=export_format, path=None)
+
+
+def _view_record_types(view: ReportView) -> tuple[str, ...] | None:
+    if view.record_types is None:
+        return None
+    return tuple(label for label in _RECORD_ORDER if label in view.record_types)
+
+
+def _emit_export(result: DNSAnalysisResult, export: ExportPlan) -> str | None:
+    """Write JSON/CSV to a file or stdout. Return an error message on failure."""
+    if export.file_format is None:
+        return None
+    try:
+        if export.path is not None:
+            write_report(export.path, result, export.file_format)
+            print(f"Wrote {export.path}", file=sys.stderr)
+            return None
+        text = dumps_json(result) if export.file_format == "json" else dumps_csv(result)
+        sys.stdout.write(text)
+        return None
+    except OSError as exc:
+        return f"Could not write report: {exc}"
 
 
 def _selected_records(lookup: CoreLookup, types: frozenset[str] | None) -> tuple[DNSRecord, ...]:
@@ -485,7 +562,7 @@ def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
     _print_ttl_summary(tuple(records))
 
 
-def _run_reverse(ip_raw: str, timeout: float) -> int:
+def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
     try:
         addr = parse_ip(ip_raw)
     except InvalidIPError as exc:
@@ -494,6 +571,8 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
     ip_text = str(addr)
     qname = ptr_name(ip_text)
+    started = time.perf_counter()
+    scan_time = datetime.now(timezone.utc).isoformat()
     resolver = DNSResolver(timeout=timeout)
     try:
         records = resolver.resolve_reverse(ip_text)
@@ -501,17 +580,34 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    _print_reverse(ip_text, qname, records)
+    duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+    result = DNSAnalysisResult(
+        target=ip_text,
+        mode="reverse",
+        scan_time=scan_time,
+        duration_ms=duration_ms,
+        records=tuple(records),
+        ptr_query=qname,
+        view_record_types=("PTR",),
+        view_security=False,
+    )
+    if export.print_human:
+        _print_reverse(ip_text, qname, records)
+    error = _emit_export(result, export)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
     return 0
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 14 (CLI)")
+    print("DNS Analyzer — Phase 15 (JSON / CSV)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
     print("       python main.py <domain> --security")
-    print("       python main.py <domain> --all")
+    print("       python main.py <domain> --format json")
+    print("       python main.py <domain> --output reports/example.json")
     print("       python main.py --reverse <ip>")
     print("Example: python main.py example.com")
     print("Example: python main.py --reverse 8.8.8.8")
@@ -528,15 +624,21 @@ def run(argv: list[str] | None = None) -> int:
         print(f"Error: {view}", file=sys.stderr)
         return 1
 
+    export = plan_export(args.export_format, args.output)
+    if isinstance(export, str):
+        print(f"Error: {export}", file=sys.stderr)
+        return 1
+
     if args.reverse and args.domain:
         print("Error: Use either a domain or --reverse, not both.", file=sys.stderr)
         return 1
 
     if args.reverse:
-        return _run_reverse(args.reverse, args.timeout)
+        return _run_reverse(args.reverse, args.timeout, export)
 
     if not args.domain:
-        if args.records or args.security or args.all:
+        extra = args.records or args.security or args.all or args.output
+        if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
             return 1
         _print_usage()
@@ -556,13 +658,8 @@ def run(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print("DNS ANALYZER")
-    print("────────────────────────")
-    print()
-    print("Target:")
-    print(domain)
-    print()
-
+    started = time.perf_counter()
+    scan_time = datetime.now(timezone.utc).isoformat()
     resolver = DNSResolver(timeout=args.timeout)
 
     try:
@@ -581,5 +678,33 @@ def run(argv: list[str] | None = None) -> int:
         dmarc = resolver.inspect_dmarc(domain)
         security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
 
-    _print_lookup(lookup, dnssec, spf, dmarc, security, view)
+    duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+    result = DNSAnalysisResult(
+        target=domain,
+        mode="forward",
+        scan_time=scan_time,
+        duration_ms=duration_ms,
+        records=lookup.all_records(),
+        errors=lookup.errors,
+        dnssec=dnssec,
+        spf=spf,
+        dmarc=dmarc,
+        security=security,
+        view_record_types=_view_record_types(view),
+        view_security=view.show_security,
+    )
+
+    if export.print_human:
+        print("DNS ANALYZER")
+        print("────────────────────────")
+        print()
+        print("Target:")
+        print(domain)
+        print()
+        _print_lookup(lookup, dnssec, spf, dmarc, security, view)
+
+    error = _emit_export(result, export)
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
     return 0

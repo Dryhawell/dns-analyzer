@@ -1,5 +1,7 @@
 """CLI tests with a mocked resolver. No network access."""
 
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -409,6 +411,8 @@ def test_cli_help_lists_modes() -> None:
     assert "--security" in help_text
     assert "--all" in help_text
     assert "--reverse" in help_text
+    assert "--format" in help_text
+    assert "--output" in help_text
     assert "not a vulnerability scanner" in help_text.lower()
 
 
@@ -416,3 +420,98 @@ def test_cli_help_exit_zero() -> None:
     with pytest.raises(SystemExit) as caught:
         run(["--help"])
     assert caught.value.code == 0
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+
+    assert run(["example.com", "--format", "json"]) == 0
+    captured = capsys.readouterr()
+    assert "DNS ANALYZER" not in captured.out
+    data = json.loads(captured.out)
+    assert data["schema"] == "dns-analyzer.report.v1"
+    assert data["target"] == "example.com"
+    assert data["mode"] == "forward"
+    assert data["records"][0]["value"] == "93.184.216.34"
+    assert data["risk_score"]["band"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+    assert data["security_analysis"]["findings"]
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_format_csv_stdout(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+            mx=[DNSRecord("MX", "example.com", "mail.example.com", 300, priority=10)],
+        ),
+    )
+
+    assert run(["example.com", "--format", "csv", "--record", "A"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("record_type,name,value,ttl,priority")
+    assert "93.184.216.34" in captured.out
+    assert "mail.example.com" in captured.out
+    assert "DNS ANALYZER" not in captured.out
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_output_json_file_keeps_human(mock_resolver_cls, tmp_path: Path, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    path = tmp_path / "example.json"
+
+    assert run(["example.com", "--output", str(path)]) == 0
+    captured = capsys.readouterr()
+    assert "DNS ANALYZER" in captured.out
+    assert f"Wrote {path}" in captured.err
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["target"] == "example.com"
+    assert data["records"][0]["record_type"] == "A"
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_format_json_output_file_skips_human(mock_resolver_cls, tmp_path: Path, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    path = tmp_path / "only.json"
+
+    assert run(["example.com", "--format", "json", "--output", str(path)]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Wrote" in captured.err
+    assert json.loads(path.read_text(encoding="utf-8"))["mode"] == "forward"
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_reverse_format_json(mock_resolver_cls, capsys) -> None:
+    mock_resolver_cls.return_value.resolve_reverse.return_value = [
+        DNSRecord("PTR", "8.8.8.8.in-addr.arpa", "dns.google", 86400),
+    ]
+
+    assert run(["--reverse", "8.8.8.8", "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["mode"] == "reverse"
+    assert data["target"] == "8.8.8.8"
+    assert data["ptr_query"] == "8.8.8.8.in-addr.arpa"
+    assert data["records"][0]["value"] == "dns.google"
+    assert data["security_analysis"] is None
+
+
+def test_cli_rejects_output_txt_in_text_mode(capsys) -> None:
+    assert run(["example.com", "--output", "out.txt"]) == 1
+    assert ".json or .csv" in capsys.readouterr().err
+
+
+def test_cli_rejects_format_output_mismatch(capsys) -> None:
+    assert run(["example.com", "--format", "json", "--output", "out.csv"]) == 1
+    assert "does not match" in capsys.readouterr().err
