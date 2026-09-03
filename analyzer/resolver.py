@@ -21,6 +21,7 @@ from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 
 from analyzer.exceptions import (
+    DNSNetworkError,
     DNSQueryError,
     DNSResolutionError,
     DNSTimeoutError,
@@ -177,6 +178,10 @@ class DNSResolver:
             _log.warning("No nameservers for %s %s", rdtype, name)
             errors.append(f"{rdtype} query had no nameservers")
             return False, False
+        except OSError:
+            _log.warning("Network error for %s %s", rdtype, name)
+            errors.append(f"{rdtype} query had a network error")
+            return False, False
         except dns.exception.DNSException:
             _log.warning("DNS query failed for %s %s", rdtype, name)
             errors.append(f"{rdtype} query failed")
@@ -206,10 +211,17 @@ class DNSResolver:
         except (dns.resolver.LifetimeTimeout, dns.exception.Timeout) as exc:
             _log.warning("DNS query timeout for %s %s", record_type, name)
             raise DNSTimeoutError() from exc
+        except OSError as exc:
+            _log.warning("Network error for %s %s", record_type, name)
+            raise DNSNetworkError() from exc
         except dns.exception.DNSException as exc:
             _log.warning("DNS query failed for %s %s", record_type, name)
             raise DNSResolutionError() from exc
 
-        records = records_from_answer(record_type, name, answer)
+        try:
+            records = records_from_answer(record_type, name, answer)
+        except (TypeError, ValueError, AttributeError) as exc:
+            _log.warning("Could not parse %s answer for %s", record_type, name)
+            raise DNSResolutionError() from exc
         _log.info("Received %s %s record(s) for %s", len(records), record_type, name)
         return records

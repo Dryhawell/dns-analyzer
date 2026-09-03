@@ -11,6 +11,7 @@ import dns.resolver
 import pytest
 
 from analyzer.exceptions import (
+    DNSNetworkError,
     DNSResolutionError,
     DNSTimeoutError,
     DomainNotFoundError,
@@ -221,6 +222,13 @@ def test_generic_dns_exception_raises(resolver: DNSResolver) -> None:
 
     with pytest.raises(DNSResolutionError):
         resolver.resolve_caa("example.com")
+
+
+def test_oserror_becomes_network_error(resolver: DNSResolver) -> None:
+    resolver._client.resolve.side_effect = OSError("unreachable")
+
+    with pytest.raises(DNSNetworkError, match="Network error"):
+        resolver.resolve_a("example.com")
 
 
 def test_custom_nameservers_are_applied() -> None:

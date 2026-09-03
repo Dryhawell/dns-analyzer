@@ -1,11 +1,12 @@
 """CLI interface.
 
-Phase 16: logging to logs/dns-analyzer.log (not stdout).
+Phase 18: controlled errors — no traceback on DNS/network/CLI failures.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from dataclasses import dataclass
@@ -14,7 +15,14 @@ from pathlib import Path
 
 from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
-from analyzer.exceptions import DNSQueryError, InvalidIPError
+from analyzer.exceptions import (
+    DNSNetworkError,
+    DNSQueryError,
+    DNSTimeoutError,
+    DomainNotFoundError,
+    InvalidIPError,
+    NoNameserversError,
+)
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
@@ -34,6 +42,7 @@ from utils.reporter import (
 )
 
 _DEFAULT_TIMEOUT = 5.0
+_MAX_TIMEOUT = 120.0
 _RECORD_ORDER = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
 _RECORD_TYPES = frozenset(_RECORD_ORDER)
 _log = get_logger("cli")
@@ -128,7 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=_DEFAULT_TIMEOUT,
         metavar="SECONDS",
-        help=f"DNS query timeout in seconds (default: {_DEFAULT_TIMEOUT})",
+        help=f"DNS query timeout in seconds (default: {_DEFAULT_TIMEOUT}, max: {_MAX_TIMEOUT:.0f})",
     )
     parser.add_argument(
         "--format",
@@ -207,6 +216,34 @@ def plan_export(export_format: str, output: str | None) -> ExportPlan | str:
             return f"--format {export_format} does not match output suffix {path.suffix}."
         return ExportPlan(print_human=False, file_format=export_format, path=path)
     return ExportPlan(print_human=False, file_format=export_format, path=None)
+
+
+def _timeout_error(value: float) -> str | None:
+    if not math.isfinite(value) or value <= 0:
+        return "Timeout must be a positive number of seconds."
+    if value > _MAX_TIMEOUT:
+        return f"Timeout cannot exceed {_MAX_TIMEOUT:.0f} seconds."
+    return None
+
+
+def _print_dns_failure(exc: DNSQueryError, target: str) -> None:
+    """User-facing DNS errors — no traceback, no library class names."""
+    if isinstance(exc, DomainNotFoundError):
+        print(f"Error: Domain does not exist ({target}).", file=sys.stderr)
+    elif isinstance(exc, DNSTimeoutError):
+        print(
+            "Error: DNS query timed out. Try a larger --timeout or check the network.",
+            file=sys.stderr,
+        )
+    elif isinstance(exc, NoNameserversError):
+        print(
+            "Error: No nameservers available (SERVFAIL or empty resolver list).",
+            file=sys.stderr,
+        )
+    elif isinstance(exc, DNSNetworkError):
+        print("Error: Network error while querying DNS.", file=sys.stderr)
+    else:
+        print(f"Error: {exc}", file=sys.stderr)
 
 
 def _view_record_types(view: ReportView) -> tuple[str, ...] | None:
@@ -586,7 +623,7 @@ def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
         records = resolver.resolve_reverse(ip_text)
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", ip_text, exc)
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_dns_failure(exc, ip_text)
         return 1
 
     duration_ms = max(0, int((time.perf_counter() - started) * 1000))
@@ -616,7 +653,7 @@ def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 16 (logging)")
+    print("DNS Analyzer — Phase 18 (error handling)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
@@ -631,8 +668,34 @@ def _print_usage() -> None:
 
 
 def run(argv: list[str] | None = None) -> int:
+    """CLI entry. DNS and network failures return 1 without a traceback."""
+    try:
+        return _run(argv)
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        return 130
+    except BrokenPipeError:
+        return 1
+    except Exception:
+        try:
+            configure_logging()
+            _log.exception("Unexpected error")
+        except OSError:
+            pass
+        print(
+            "Error: Unexpected failure. Details were written to the log file.",
+            file=sys.stderr,
+        )
+        return 1
+
+
+def _run(argv: list[str] | None = None) -> int:
     _ensure_utf8_stdout()
     args = build_parser().parse_args(argv)
+    timeout_problem = _timeout_error(args.timeout)
+    if timeout_problem:
+        print(f"Error: {timeout_problem}", file=sys.stderr)
+        return 1
 
     view = resolve_report_view(args)
     if isinstance(view, str):
@@ -691,18 +754,23 @@ def run(argv: list[str] | None = None) -> int:
         lookup = resolver.lookup_core(domain)
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_dns_failure(exc, domain)
         return 1
 
     dnssec = None
     spf = None
     dmarc = None
     security = None
-    if view.show_security:
-        dnssec = resolver.inspect_dnssec(domain)
-        spf = inspect_spf(lookup.txt, lookup.errors)
-        dmarc = resolver.inspect_dmarc(domain)
-        security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
+    try:
+        if view.show_security:
+            dnssec = resolver.inspect_dnssec(domain)
+            spf = inspect_spf(lookup.txt, lookup.errors)
+            dmarc = resolver.inspect_dmarc(domain)
+            security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
+    except DNSQueryError as exc:
+        _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
+        _print_dns_failure(exc, domain)
+        return 1
 
     duration_ms = max(0, int((time.perf_counter() - started) * 1000))
     _log.info(

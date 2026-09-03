@@ -545,7 +545,45 @@ def test_cli_nxdomain_exits_one(mock_resolver_cls, capsys) -> None:
 def test_cli_timeout_exits_one(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.lookup_core.side_effect = DNSTimeoutError()
     assert run(["example.com"]) == 1
-    assert "timed out" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "timed out" in err
+    assert "Traceback" not in err
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_network_error_exits_one(mock_resolver_cls, capsys) -> None:
+    from analyzer.exceptions import DNSNetworkError
+
+    mock_resolver_cls.return_value.lookup_core.side_effect = DNSNetworkError()
+    assert run(["example.com"]) == 1
+    err = capsys.readouterr().err
+    assert "Network error while querying DNS" in err
+    assert "Traceback" not in err
+
+
+def test_cli_rejects_non_positive_timeout(capsys) -> None:
+    assert run(["example.com", "--timeout", "0"]) == 1
+    assert "positive" in capsys.readouterr().err
+
+
+def test_cli_rejects_huge_timeout(capsys) -> None:
+    assert run(["example.com", "--timeout", "999"]) == 1
+    assert "120" in capsys.readouterr().err
+
+
+@patch("cli.interface._run", side_effect=RuntimeError("boom"))
+def test_cli_unexpected_error_has_no_traceback(mock_run, capsys) -> None:
+    assert run(["example.com"]) == 1
+    err = capsys.readouterr().err
+    assert "Unexpected failure" in err
+    assert "Traceback" not in err
+    assert "boom" not in err
+
+
+@patch("cli.interface._run", side_effect=KeyboardInterrupt)
+def test_cli_interrupt_exits_130(mock_run, capsys) -> None:
+    assert run(["example.com"]) == 130
+    assert "Interrupted" in capsys.readouterr().err
 
 
 def test_plan_export_text_is_human_only() -> None:

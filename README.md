@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 17 — unit tests (mocked DNS, no live nameservers).
+> **Current status:** Phase 18 — error handling (no traceback on DNS/network failures).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -94,7 +94,7 @@ Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **S
 
 JSON includes `schema` (`dns-analyzer.report.v1`), `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). CSV is a flat table: `record_type,name,value,ttl,priority`. `--record A` still **collects** all core types (so JSON is complete); it only **hides** other sections on the terminal.
 
-Invalid input or DNS failures (NXDOMAIN on a domain, timeout) exit with code 1 and a clear error.
+Invalid input or DNS failures (NXDOMAIN on a domain, timeout, network error) exit with code 1 and a clear message. The program does not print a traceback for those cases. Ctrl+C exits 130 (`Interrupted.`). `--timeout` must be between 0 (exclusive) and 120 seconds.
 
 ## DNS Record Types (so far)
 
@@ -265,7 +265,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 18 — Error handling improvements**.
+See the phase plan in the project brief. Next: **Phase 19 — Performance improvements**.
 
 ## License
 

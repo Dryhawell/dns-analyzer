@@ -4,6 +4,7 @@ from analyzer.dmarc import DmarcObservation, evaluate_dmarc
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
     DNSQueryError,
+    DNSNetworkError,
     DNSResolutionError,
     DNSTimeoutError,
     DomainNotFoundError,
@@ -23,6 +24,7 @@ __all__ = [
     "DnssecObservation",
     "CoreLookup",
     "DNSQueryError",
+    "DNSNetworkError",
     "DNSRecord",
     "DNSAnalysisResult",
     "DNSResolutionError",
