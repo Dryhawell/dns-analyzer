@@ -12,6 +12,8 @@ a config-driven list into DNSResolver(nameservers=...).
 from __future__ import annotations
 
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 import dns.exception
 import dns.flags
@@ -34,7 +36,25 @@ from analyzer.reverse import ptr_name
 from utils.logger import get_logger
 
 _DEFAULT_TIMEOUT = 5.0
+CORE_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
 _log = get_logger("resolver")
+
+
+def _normalize_types(types: Sequence[str] | None) -> tuple[str, ...]:
+    """Restrict a lookup to known core types. A is always included.
+
+    A answers "does this name exist?" NXDOMAIN there still aborts the scan.
+    An empty list therefore means A only, not "query nothing".
+    """
+    if types is None:
+        return CORE_TYPES
+    wanted: set[str] = {"A"}
+    for raw in types:
+        label = str(raw).strip().upper()
+        if label not in CORE_TYPES:
+            raise ValueError(f"Unsupported core record type: {raw!r}")
+        wanted.add(label)
+    return tuple(label for label in CORE_TYPES if label in wanted)
 
 
 class DNSResolver:
@@ -52,6 +72,8 @@ class DNSResolver:
         self._client.lifetime = timeout
         if nameservers:
             self._client.nameservers = list(nameservers)
+        self._lock = Lock()
+        self.parallel = True
 
     def resolve_a(self, name: str) -> list[DNSRecord]:
         return self._query(name, "A")
@@ -63,39 +85,86 @@ class DNSResolver:
         """Query A then AAAA. NXDOMAIN on A stops the pair (name does not exist)."""
         return self.resolve_a(name), self.resolve_aaaa(name)
 
-    def lookup_core(self, name: str) -> CoreLookup:
-        """Query core record types. A NXDOMAIN/timeout still aborts.
+    def lookup_core(
+        self,
+        name: str,
+        types: Sequence[str] | None = None,
+    ) -> CoreLookup:
+        """Query selected core types. A NXDOMAIN/timeout still aborts.
 
-        Later types (AAAA, CNAME, MX, ...) collect errors instead of
-        discarding the whole result — CAA timeouts are common on some resolvers.
+        A is queried first (does this name exist?). Remaining types run in
+        parallel when there are two or more — they are independent questions.
+        Later-type failures are collected so a CAA timeout does not drop A.
         """
+        wanted = _normalize_types(types)
+        buckets: dict[str, tuple[DNSRecord, ...]] = {label: () for label in CORE_TYPES}
         errors: list[tuple[str, str]] = []
 
-        def collect(label: str, query) -> tuple[DNSRecord, ...]:
-            try:
-                return tuple(query())
-            except DomainNotFoundError:
-                if label == "A":
-                    raise
-                errors.append((label, "Domain does not exist."))
-                return ()
-            except DNSQueryError as exc:
-                if label == "A":
-                    raise
-                errors.append((label, str(exc)))
-                return ()
+        if "A" in wanted:
+            records, error = self._try_type(name, "A", fatal=True)
+            buckets["A"] = records
+            if error:
+                errors.append(error)
+
+        rest = [label for label in wanted if label != "A"]
+        if len(rest) >= 2 and self.parallel:
+            _log.info("Querying %s remaining types in parallel for %s", len(rest), name)
+            with ThreadPoolExecutor(max_workers=min(8, len(rest))) as pool:
+                futures = [pool.submit(self._try_type, name, label, False) for label in rest]
+                for label, future in zip(rest, futures, strict=True):
+                    records, error = future.result()
+                    buckets[label] = records
+                    if error:
+                        errors.append(error)
+        else:
+            for label in rest:
+                records, error = self._try_type(name, label, fatal=False)
+                buckets[label] = records
+                if error:
+                    errors.append(error)
 
         return CoreLookup(
-            a=collect("A", lambda: self.resolve_a(name)),
-            aaaa=collect("AAAA", lambda: self.resolve_aaaa(name)),
-            cname=collect("CNAME", lambda: self.resolve_cname(name)),
-            mx=collect("MX", lambda: self.resolve_mx(name)),
-            ns=collect("NS", lambda: self.resolve_ns(name)),
-            txt=collect("TXT", lambda: self.resolve_txt(name)),
-            soa=collect("SOA", lambda: self.resolve_soa(name)),
-            caa=collect("CAA", lambda: self.resolve_caa(name)),
+            a=buckets["A"],
+            aaaa=buckets["AAAA"],
+            cname=buckets["CNAME"],
+            mx=buckets["MX"],
+            ns=buckets["NS"],
+            txt=buckets["TXT"],
+            soa=buckets["SOA"],
+            caa=buckets["CAA"],
             errors=tuple(errors),
         )
+
+    def _try_type(
+        self,
+        name: str,
+        label: str,
+        fatal: bool,
+    ) -> tuple[tuple[DNSRecord, ...], tuple[str, str] | None]:
+        try:
+            records = tuple(self._resolve_label(name, label))
+            return records, None
+        except DomainNotFoundError:
+            if fatal:
+                raise
+            return (), (label, "Domain does not exist.")
+        except DNSQueryError as exc:
+            if fatal:
+                raise
+            return (), (label, str(exc))
+
+    def _resolve_label(self, name: str, label: str) -> list[DNSRecord]:
+        methods = {
+            "A": self.resolve_a,
+            "AAAA": self.resolve_aaaa,
+            "CNAME": self.resolve_cname,
+            "MX": self.resolve_mx,
+            "NS": self.resolve_ns,
+            "TXT": self.resolve_txt,
+            "SOA": self.resolve_soa,
+            "CAA": self.resolve_caa,
+        }
+        return methods[label](name)
 
     def resolve_cname(self, name: str) -> list[DNSRecord]:
         return self._query(name, "CNAME")
@@ -140,15 +209,9 @@ class DNSResolver:
 
     def inspect_dnssec(self, name: str) -> DnssecObservation:
         """Look for DNSKEY/DS and the AD flag. Failures become observations."""
-        client = dns.resolver.Resolver(configure=True)
-        client.timeout = self.timeout
-        client.lifetime = self.timeout
-        if self._client.nameservers:
-            client.nameservers = list(self._client.nameservers)
-        # DO bit: ask the resolver to include DNSSEC records when it can.
-        client.use_edns(0, dns.flags.DO, 1232)
-
+        client = self._edns_client()
         errors: list[str] = []
+        # Sequential on purpose: two queries, and tests mock probe order.
         dnskey_found, ad_key = self._dnssec_probe(client, name, "DNSKEY", errors)
         ds_found, ad_ds = self._dnssec_probe(client, name, "DS", errors)
         return evaluate_dnssec(
@@ -191,6 +254,19 @@ class DNSResolver:
         ad_flag = bool(response is not None and (response.flags & dns.flags.AD))
         return True, ad_flag
 
+    def _edns_client(self) -> dns.resolver.Resolver:
+        """EDNS client for DNSSEC probes. Reuse nameservers; skip resolv.conf."""
+        nameservers = list(self._client.nameservers)
+        if nameservers:
+            client = dns.resolver.Resolver(configure=False)
+            client.nameservers = nameservers
+        else:
+            client = dns.resolver.Resolver(configure=True)
+        client.timeout = self.timeout
+        client.lifetime = self.timeout
+        client.use_edns(0, dns.flags.DO, 1232)
+        return client
+
     def _query(self, name: str, record_type: str) -> list[DNSRecord]:
         """Ask the recursive resolver for one record type.
 
@@ -199,7 +275,9 @@ class DNSResolver:
         """
         _log.info("Querying %s record for %s", record_type, name)
         try:
-            answer = self._client.resolve(name, record_type, search=False)
+            # dnspython Resolver is not thread-safe; parallel lookups share this client.
+            with self._lock:
+                answer = self._client.resolve(name, record_type, search=False)
         except dns.resolver.NXDOMAIN as exc:
             _log.info("NXDOMAIN for %s %s", record_type, name)
             raise DomainNotFoundError() from exc

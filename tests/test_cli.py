@@ -10,7 +10,7 @@ from analyzer.dmarc import evaluate_dmarc
 from analyzer.dnssec import evaluate_dnssec
 from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
-from cli.interface import ExportPlan, build_parser, plan_export, run
+from cli.interface import ExportPlan, ReportView, build_parser, plan_export, run, types_to_query
 
 
 def _lookup(
@@ -73,6 +73,9 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     )
 
     assert run(["example.com"]) == 0
+    mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
+        "example.com", types=None
+    )
     output = capsys.readouterr().out
     assert "Target:" in output
     assert "example.com" in output
@@ -315,6 +318,9 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     assert "RISK SCORE" not in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
     mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
+    mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
+        "example.com", types=("A",)
+    )
 
 
 @patch("cli.interface.DNSResolver")
@@ -334,6 +340,9 @@ def test_cli_record_can_be_repeated(mock_resolver_cls, capsys) -> None:
     assert "NS RECORDS" in output
     assert "A RECORDS" not in output
     assert "SECURITY ANALYSIS" not in output
+    mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
+        "example.com", types=("A", "MX", "NS")
+    )
 
 
 @patch("cli.interface.DNSResolver")
@@ -353,6 +362,9 @@ def test_cli_security_flag_skips_record_dump(mock_resolver_cls, capsys) -> None:
     assert "SECURITY ANALYSIS" in output
     assert "RISK SCORE" in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_called_once()
+    mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
+        "example.com", types=("A", "AAAA", "CNAME", "TXT", "CAA")
+    )
 
 
 @patch("cli.interface.DNSResolver")
@@ -370,6 +382,9 @@ def test_cli_record_plus_security(mock_resolver_cls, capsys) -> None:
     assert "A RECORDS" in output
     assert "MX RECORDS" not in output
     assert "SECURITY ANALYSIS" in output
+    mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
+        "example.com", types=("A", "AAAA", "CNAME", "TXT", "CAA")
+    )
 
 
 @patch("cli.interface.DNSResolver")
@@ -456,9 +471,12 @@ def test_cli_format_csv_stdout(mock_resolver_cls, capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out.startswith("record_type,name,value,ttl,priority")
     assert "93.184.216.34" in captured.out
-    assert "mail.example.com" in captured.out
+    assert "mail.example.com" not in captured.out
     assert "DNS ANALYZER" not in captured.out
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
+        "example.com", types=("A",)
+    )
 
 
 @patch("cli.interface.DNSResolver")
@@ -600,3 +618,28 @@ def test_plan_export_json_stdout() -> None:
     assert plan.print_human is False
     assert plan.file_format == "json"
     assert plan.path is None
+
+
+def test_types_to_query_default_is_all() -> None:
+    view = ReportView(record_types=None, show_security=True)
+    assert types_to_query(view) is None
+
+
+def test_types_to_query_record_mx_includes_a() -> None:
+    view = ReportView(record_types=frozenset({"MX"}), show_security=False)
+    assert types_to_query(view) == ("A", "MX")
+
+
+def test_types_to_query_record_a_only() -> None:
+    view = ReportView(record_types=frozenset({"A"}), show_security=False)
+    assert types_to_query(view) == ("A",)
+
+
+def test_types_to_query_security_skips_mx_ns_soa() -> None:
+    view = ReportView(record_types=frozenset(), show_security=True)
+    assert types_to_query(view) == ("A", "AAAA", "CNAME", "TXT", "CAA")
+
+
+def test_types_to_query_record_plus_security() -> None:
+    view = ReportView(record_types=frozenset({"MX"}), show_security=True)
+    assert types_to_query(view) == ("A", "AAAA", "CNAME", "MX", "TXT", "CAA")

@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 18 — error handling (no traceback on DNS/network failures).
+> **Current status:** Phase 19 — query only needed record types; remaining types after A may run in parallel.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -83,8 +83,8 @@ python main.py --reverse 8.8.8.8 --format json
 | Mode | What you get |
 | --- | --- |
 | (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, findings, risk score |
-| `--record TYPE` | Only that type (repeatable). Skips security queries |
-| `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump |
+| `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
+| `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA) |
 | `--record A --security` | That type plus the security sections |
 | `--reverse IP` | PTR only |
 | `--format json` / `csv` | Machine-readable stdout (no human dump) |
@@ -92,7 +92,7 @@ python main.py --reverse 8.8.8.8 --format json
 
 Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). CSV is a flat table: `record_type,name,value,ttl,priority`. `--record A` still **collects** all core types (so JSON is complete); it only **hides** other sections on the terminal.
+JSON includes `schema` (`dns-analyzer.report.v1`), `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). CSV is a flat table: `record_type,name,value,ttl,priority`. `--record A` **queries only A** (existence check is A itself); JSON/CSV contain collected records, not hidden extras.
 
 Invalid input or DNS failures (NXDOMAIN on a domain, timeout, network error) exit with code 1 and a clear message. The program does not print a traceback for those cases. Ctrl+C exits 130 (`Interrupted.`). `--timeout` must be between 0 (exclusive) and 120 seconds.
 
@@ -265,7 +265,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 19 — Performance improvements**.
+See the phase plan in the project brief. Next: **Phase 20 — Optional multi-resolver (config, no hardcoded IPs)**.
 
 ## License
 

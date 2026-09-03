@@ -17,7 +17,7 @@ from analyzer.exceptions import (
     DomainNotFoundError,
     NoNameserversError,
 )
-from analyzer.resolver import DNSResolver
+from analyzer.resolver import CORE_TYPES, DNSResolver, _normalize_types
 
 
 class DummyRdata:
@@ -35,6 +35,26 @@ def _answer(*rdata: object, ttl: int = 3600) -> MagicMock:
     answer.ttl = ttl
     answer.__iter__.return_value = iter(rdata)
     return answer
+
+
+def _dispatch(resolver: DNSResolver, answers: dict[str, object]) -> None:
+    """Return/raise by rdtype. Parallel lookups cannot share a side_effect list."""
+
+    def resolve(name: str, rdtype: str, search: bool = False):
+        value = answers[rdtype]
+        if isinstance(value, BaseException):
+            raise value
+        if isinstance(value, type) and issubclass(value, BaseException):
+            raise value()
+        return value
+
+    resolver._client.resolve.side_effect = resolve
+
+
+def _core_answers(**overrides: object) -> dict[str, object]:
+    answers: dict[str, object] = {label: _answer() for label in CORE_TYPES}
+    answers.update(overrides)
+    return answers
 
 
 @pytest.fixture
@@ -84,27 +104,29 @@ def test_resolve_addresses_queries_a_then_aaaa(resolver: DNSResolver) -> None:
 
 
 def test_lookup_core_queries_cname_mx_ns(resolver: DNSResolver) -> None:
-    resolver._client.resolve.side_effect = [
-        _answer(DummyRdata("93.184.216.34")),
-        _answer(),
-        _answer(DummyRdata("target.example.net.")),
-        _answer(DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")),
-        _answer(DummyRdata("ns1.example.com.")),
-        _answer(DummyRdata("ignored", strings=(b"v=spf1 -all",))),
-        _answer(
-            DummyRdata(
-                "unused",
-                mname="ns1.example.com.",
-                rname="hostmaster.example.com.",
-                serial=1,
-                refresh=1,
-                retry=1,
-                expire=1,
-                minimum=1,
-            )
+    _dispatch(
+        resolver,
+        _core_answers(
+            A=_answer(DummyRdata("93.184.216.34")),
+            CNAME=_answer(DummyRdata("target.example.net.")),
+            MX=_answer(DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")),
+            NS=_answer(DummyRdata("ns1.example.com.")),
+            TXT=_answer(DummyRdata("ignored", strings=(b"v=spf1 -all",))),
+            SOA=_answer(
+                DummyRdata(
+                    "unused",
+                    mname="ns1.example.com.",
+                    rname="hostmaster.example.com.",
+                    serial=1,
+                    refresh=1,
+                    retry=1,
+                    expire=1,
+                    minimum=1,
+                )
+            ),
+            CAA=_answer(DummyRdata("unused", flags=0, tag="issue", value="letsencrypt.org")),
         ),
-        _answer(DummyRdata("unused", flags=0, tag="issue", value="letsencrypt.org")),
-    ]
+    )
 
     lookup = resolver.lookup_core("www.example.com")
 
@@ -118,26 +140,62 @@ def test_lookup_core_queries_cname_mx_ns(resolver: DNSResolver) -> None:
     assert lookup.soa[0].details[0][1] == "ns1.example.com"
     assert lookup.caa[0].value == '0 issue "letsencrypt.org"'
     queried_types = [call.args[1] for call in resolver._client.resolve.call_args_list]
-    assert queried_types == ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA"]
+    assert queried_types[0] == "A"
+    assert set(queried_types) == set(CORE_TYPES)
+    assert len(queried_types) == len(CORE_TYPES)
 
 
 def test_lookup_core_keeps_results_if_caa_times_out(resolver: DNSResolver) -> None:
-    resolver._client.resolve.side_effect = [
-        _answer(DummyRdata("93.184.216.34")),
-        _answer(),
-        _answer(),
-        _answer(),
-        _answer(),
-        _answer(),
-        _answer(),
-        dns.exception.Timeout(),
-    ]
+    _dispatch(
+        resolver,
+        _core_answers(
+            A=_answer(DummyRdata("93.184.216.34")),
+            CAA=dns.exception.Timeout(),
+        ),
+    )
 
     lookup = resolver.lookup_core("example.com")
 
     assert lookup.a[0].value == "93.184.216.34"
     assert lookup.caa == ()
     assert lookup.errors == (("CAA", "DNS query timed out."),)
+
+
+def test_lookup_core_queries_only_requested_types(resolver: DNSResolver) -> None:
+    def resolve(name: str, rdtype: str, search: bool = False):
+        if rdtype == "A":
+            return _answer(DummyRdata("93.184.216.34"))
+        if rdtype == "MX":
+            return _answer(
+                DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")
+            )
+        raise AssertionError(f"unexpected type {rdtype}")
+
+    resolver._client.resolve.side_effect = resolve
+
+    lookup = resolver.lookup_core("example.com", types=("MX",))
+
+    queried = [call.args[1] for call in resolver._client.resolve.call_args_list]
+    assert queried == ["A", "MX"]
+    assert lookup.mx[0].value == "mail.example.com"
+    assert lookup.ns == ()
+    assert lookup.txt == ()
+
+
+def test_lookup_core_a_only_skips_later_types(resolver: DNSResolver) -> None:
+    resolver._client.resolve.return_value = _answer(DummyRdata("93.184.216.34"))
+
+    lookup = resolver.lookup_core("example.com", types=("A",))
+
+    assert lookup.a[0].value == "93.184.216.34"
+    assert lookup.mx == ()
+    resolver._client.resolve.assert_called_once_with("example.com", "A", search=False)
+
+
+def test_normalize_types_always_includes_a() -> None:
+    assert _normalize_types(None) == CORE_TYPES
+    assert _normalize_types(("MX",)) == ("A", "MX")
+    assert _normalize_types(()) == ("A",)
 
 
 def test_lookup_core_a_nxdomain_does_not_query_later_types(resolver: DNSResolver) -> None:
@@ -237,6 +295,14 @@ def test_custom_nameservers_are_applied() -> None:
     assert resolver._client.nameservers == ["1.1.1.1"]
     assert resolver._client.timeout == 1.5
     assert resolver._client.lifetime == 1.5
+
+
+def test_edns_client_reuses_nameservers_without_os_config() -> None:
+    resolver = DNSResolver(timeout=1.5, nameservers=["192.0.2.53"])
+    client = resolver._edns_client()
+    assert client.nameservers == ["192.0.2.53"]
+    assert client.timeout == 1.5
+    assert client.lifetime == 1.5
 
 
 def test_resolve_reverse_queries_ptr_zone(resolver: DNSResolver) -> None:

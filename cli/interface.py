@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 18: controlled errors — no traceback on DNS/network/CLI failures.
+Phase 19: query only needed types; parallel remaining lookups.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ import argparse
 import math
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,7 @@ _DEFAULT_TIMEOUT = 5.0
 _MAX_TIMEOUT = 120.0
 _RECORD_ORDER = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
 _RECORD_TYPES = frozenset(_RECORD_ORDER)
+_SECURITY_QUERY_TYPES = ("A", "AAAA", "CNAME", "TXT", "CAA")
 _log = get_logger("cli")
 
 _EPILOG = """
@@ -114,7 +116,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TYPE",
         help=(
             "Show only this record type (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA). "
-            "Repeatable. PTR is --reverse, not --record PTR."
+            "Repeatable. Other types are not queried. A is always queried first "
+            "so NXDOMAIN can abort. PTR is --reverse, not --record PTR."
         ),
     )
     parser.add_argument(
@@ -193,6 +196,20 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
     if has_filter:
         return ReportView(record_types=frozenset(selected), show_security=False)
     return ReportView(record_types=frozenset(), show_security=True)
+
+
+def types_to_query(view: ReportView) -> tuple[str, ...] | None:
+    """Which core types to send. None means every CORE type (default / --all).
+
+    --record MX still queries A first (existence). --security skips MX/NS/SOA.
+    """
+    if view.record_types is None:
+        return None
+    needed: set[str] = {"A"}
+    needed.update(view.record_types)
+    if view.show_security:
+        needed.update(_SECURITY_QUERY_TYPES)
+    return tuple(label for label in _RECORD_ORDER if label in needed)
 
 
 def plan_export(export_format: str, output: str | None) -> ExportPlan | str:
@@ -653,7 +670,7 @@ def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 18 (error handling)")
+    print("DNS Analyzer — Phase 19 (query performance)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
@@ -749,9 +766,10 @@ def _run(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     scan_time = datetime.now(timezone.utc).isoformat()
     resolver = DNSResolver(timeout=args.timeout)
+    needed = types_to_query(view)
 
     try:
-        lookup = resolver.lookup_core(domain)
+        lookup = resolver.lookup_core(domain, types=needed)
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
         _print_dns_failure(exc, domain)
@@ -763,9 +781,12 @@ def _run(argv: list[str] | None = None) -> int:
     security = None
     try:
         if view.show_security:
-            dnssec = resolver.inspect_dnssec(domain)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
+                fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
+                dnssec = fut_dnssec.result()
+                dmarc = fut_dmarc.result()
             spf = inspect_spf(lookup.txt, lookup.errors)
-            dmarc = resolver.inspect_dmarc(domain)
             security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
@@ -779,12 +800,15 @@ def _run(argv: list[str] | None = None) -> int:
         duration_ms,
         len(lookup.all_records()),
     )
+    collected = lookup.all_records()
+    if needed is not None:
+        collected = tuple(record for record in collected if record.record_type in needed)
     result = DNSAnalysisResult(
         target=domain,
         mode="forward",
         scan_time=scan_time,
         duration_ms=duration_ms,
-        records=lookup.all_records(),
+        records=collected,
         errors=lookup.errors,
         dnssec=dnssec,
         spf=spf,
