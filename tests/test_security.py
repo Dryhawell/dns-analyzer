@@ -132,6 +132,8 @@ def test_clean_configuration_has_no_findings() -> None:
     )
     assert report.findings == ()
     assert report.highest_severity is None
+    assert report.risk.value == 0
+    assert report.risk.band == "LOW"
 
 
 def test_missing_dmarc_is_low_not_high() -> None:

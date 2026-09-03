@@ -269,6 +269,12 @@ def test_cli_prints_security_observations(mock_resolver_cls, capsys) -> None:
     assert "[LOW] DMARC not published" in output
     assert "[HIGH]" not in output
     assert "not vulnerability scanner results" in output
+    assert "RISK SCORE" in output
+    assert "Band:" in output
+    assert "not CVSS" in output
+    assert "Contributions:" in output
+    assert "+10  DMARC not published" in output
+    assert "+5  DNSSEC not detected by this resolver" in output
 
 
 @patch("cli.interface.DNSResolver")

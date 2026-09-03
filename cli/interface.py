@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 12: records, TTL, DNSSEC, SPF, DMARC, security observations.
+Phase 13: records, TTL, DNSSEC, SPF, DMARC, security observations, risk score.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
 from analyzer.reverse import looks_like_ip, parse_ip, ptr_name
+from analyzer.risk import RiskScore
 from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
@@ -295,22 +296,40 @@ def _print_security(report: SecurityReport) -> None:
     if not report.findings:
         print("No findings from this pass.")
         print()
-        print(report.disclaimer)
+    else:
+        print(f"Findings: {len(report.findings)}")
         print()
-        return
-
-    print(f"Findings: {len(report.findings)}")
-    print()
-    for finding in report.findings:
-        _print_finding(finding)
+        for finding in report.findings:
+            _print_finding(finding)
     print(report.disclaimer)
     print()
+    _print_risk(report.risk)
 
 
 def _print_finding(finding: SecurityFinding) -> None:
     print(f"[{finding.severity.upper()}] {finding.title}")
     print(finding.description)
     print(f"Recommendation: {finding.recommendation}")
+    print()
+
+
+def _print_risk(risk: RiskScore) -> None:
+    print("RISK SCORE")
+    print("────────────────────────")
+    print(f"Score: {risk.value}/100")
+    print(f"Band:  {risk.band}")
+    print()
+    if risk.contributions:
+        print("Contributions:")
+        for item in risk.contributions:
+            print(f"  +{item.points}  {item.label}")
+        if risk.capped:
+            print(f"  (raw total {risk.raw_total} capped at 100)")
+        print()
+    else:
+        print("No scored findings.")
+        print()
+    print(risk.note)
     print()
 
 
@@ -356,7 +375,7 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 12 (security analysis)")
+    print("DNS Analyzer — Phase 13 (risk scoring)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py --reverse <ip>")

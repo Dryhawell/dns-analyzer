@@ -12,6 +12,7 @@ from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import CoreLookup
 from analyzer.records import describe_ip_scope
+from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfObservation
 
 DISCLAIMER = (
@@ -28,11 +29,13 @@ class SecurityFinding:
     title: str
     description: str
     recommendation: str
+    code: str
 
 
 @dataclass(frozen=True)
 class SecurityReport:
     findings: tuple[SecurityFinding, ...]
+    risk: RiskScore
     disclaimer: str = DISCLAIMER
 
     @property
@@ -63,7 +66,10 @@ class SecurityAnalyzer:
         findings.extend(self._txt_volume(lookup))
         order = {"high": 0, "medium": 1, "low": 2, "info": 3}
         findings.sort(key=lambda item: (order.get(item.severity, 9), item.title))
-        return SecurityReport(findings=tuple(findings))
+        return SecurityReport(
+            findings=tuple(findings),
+            risk=score_risk(findings),
+        )
 
     def _dnssec(self, dnssec: DnssecObservation) -> list[SecurityFinding]:
         if dnssec.status == "DETECTED":
@@ -82,6 +88,7 @@ class SecurityAnalyzer:
                     "If you operate the domain, confirm DNSKEY/DS at the registrar "
                     "and test with a validating resolver. Absence is not a compromise."
                 ),
+                code="dnssec_not_detected",
             )
         ]
 
@@ -97,6 +104,7 @@ class SecurityAnalyzer:
                         "a missing policy, and it is not a compromise."
                     ),
                     recommendation="Retry the TXT lookup before treating SPF as unpublished.",
+                    code="spf_unreadable",
                 )
             )
             return findings
@@ -114,6 +122,7 @@ class SecurityAnalyzer:
                         "If this name sends mail, publish a single v=spf1 record. "
                         "If it does not send mail, v=spf1 -all is a common choice."
                     ),
+                    code="spf_missing",
                 )
             )
             return findings
@@ -127,6 +136,7 @@ class SecurityAnalyzer:
                         "often cause a permanent SPF error at receivers."
                     ),
                     recommendation="Keep a single v=spf1 TXT record and merge mechanisms.",
+                    code="spf_multiple",
                 )
             )
         if spf.all_term in {"+all", "all"}:
@@ -139,6 +149,7 @@ class SecurityAnalyzer:
                         "That does not authenticate mail; it mainly disables SPF as a filter."
                     ),
                     recommendation="Replace +all with ~all or -all unless you have a rare reason not to.",
+                    code="spf_plus_all",
                 )
             )
         return findings
@@ -155,6 +166,7 @@ class SecurityAnalyzer:
                         "policy, and it is not a compromise."
                     ),
                     recommendation="Retry the _dmarc lookup before treating DMARC as unpublished.",
+                    code="dmarc_unreadable",
                 )
             ]
         if dmarc.status != "FOUND":
@@ -171,6 +183,7 @@ class SecurityAnalyzer:
                         "If you own the domain, consider _dmarc with p=none plus rua "
                         "for reporting, then quarantine/reject when ready."
                     ),
+                    code="dmarc_missing",
                 )
             )
             return findings
@@ -184,6 +197,7 @@ class SecurityAnalyzer:
                         "treat that as an invalid policy and ignore DMARC."
                     ),
                     recommendation="Keep a single v=DMARC1 record at _dmarc.<domain>.",
+                    code="dmarc_multiple",
                 )
             )
         if dmarc.policy == "none":
@@ -199,6 +213,7 @@ class SecurityAnalyzer:
                         "Use rua reports, then move to quarantine or reject when legitimate "
                         "mail is aligned."
                     ),
+                    code="dmarc_p_none",
                 )
             )
         return findings
@@ -220,6 +235,7 @@ class SecurityAnalyzer:
                     "If you issue TLS certificates, CAA can restrict which CAs may issue. "
                     "Only add it if you intend that policy."
                 ),
+                code="caa_missing",
             )
         ]
 
@@ -244,6 +260,7 @@ class SecurityAnalyzer:
                             "this is often a misconfiguration, not proof of a breach."
                         ),
                         recommendation="Confirm the name should not publish a public address, or fix the record.",
+                        code="address_non_global",
                     )
                 )
         return findings
@@ -266,6 +283,7 @@ class SecurityAnalyzer:
                     "Resolve the CNAME target directly. If the target is gone, remove "
                     "the alias so someone else cannot claim it."
                 ),
+                code="cname_dangling",
             )
         ]
 
@@ -281,5 +299,6 @@ class SecurityAnalyzer:
                     "malicious; leftover verification tokens do add noise."
                 ),
                 recommendation="Review TXT records and remove unused verification strings.",
+                code="txt_many",
             )
         ]

@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 12 — security analysis engine (observations, not CVEs).
+> **Current status:** Phase 13 — transparent risk score (local heuristic, not a standard).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -37,7 +37,7 @@ Three layers:
 - CAA inspection
 - Reverse DNS (`PTR`)
 - Security findings with severity, description, recommendation
-- Optional risk score (transparent, non-standard)
+- Transparent risk score (local heuristic; not CVSS)
 - JSON / CSV reports
 - Logging and unit tests with mocks
 
@@ -140,7 +140,28 @@ After records and policy sections, the CLI prints **SECURITY ANALYSIS**. Each fi
 
 This engine **does not assign CVEs**. Missing DNSSEC, SPF, DMARC, or CAA is a configuration signal. `p=none` is a weak/monitor policy, not a critical hole. `+all` and multiple SPF/DMARC records are treated as configuration issues. A private or loopback A/AAAA on a name is flagged as likely misconfiguration, not proof of a breach. A CNAME with no A/AAAA in this resolver view is a possible dangling alias — not an automatic takeover.
 
-There is **no risk score yet** (Phase 13).
+## Risk score
+
+The CLI prints **RISK SCORE** after findings. The number is **0–100**; higher means more concern **in this tool only**.
+
+| Score | Band |
+| --- | --- |
+| 0–20 | LOW |
+| 21–50 | MEDIUM |
+| 51–75 | HIGH |
+| 76–100 | CRITICAL |
+
+This is **not CVSS**, not a NIST/ISO grade, and not a probability that the domain is compromised. Each point is listed as a contribution so you can see the math.
+
+Examples from the current weights:
+
+- Missing DMARC: **+10**
+- Weak DMARC (`p=none`): **+5**
+- DNSSEC not detected: **+5** (intentionally small — many resolvers hide DNSSEC)
+- SPF `+all`: **+22**
+- TXT timeout: **+0** (unread is not treated as missing)
+
+A clean published set (DNSSEC visible, SPF `-all`, DMARC `p=reject`, CAA present, public A) scores **0**.
 
 ## Reverse DNS
 
@@ -177,6 +198,7 @@ dns-analyzer/
 
 - Not a vulnerability scanner
 - Absence of DNSSEC / SPF / DMARC / CAA is a signal, not automatic critical risk
+- The risk score is a local heuristic, not a security standard
 - Results must be interpreted in context
 - Subdomain enumeration (future) is for authorized domains only
 
@@ -190,7 +212,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 13 — Risk scoring** (transparent, non-standard; DNSSEC absence is not over-penalized).
+See the phase plan in the project brief. Next: **Phase 14 — CLI polish** (`--record`, `--security`, `--all`).
 
 ## License
 
