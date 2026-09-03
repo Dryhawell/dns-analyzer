@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 13 — transparent risk score (local heuristic, not a standard).
+> **Current status:** Phase 14 — CLI modes (`--record`, `--security`, `--all`).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -67,13 +67,25 @@ pip install -r requirements.txt
 
 ```bash
 python main.py example.com
+python main.py example.com --all
+python main.py example.com --record A
+python main.py example.com --record MX --record NS
+python main.py example.com --security
 python main.py https://example.com/login
 python main.py example.com --timeout 3
 python main.py --reverse 8.8.8.8
 python main.py --help
 ```
 
-Forward lookup queries **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
+| Mode | What you get |
+| --- | --- |
+| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, findings, risk score |
+| `--record TYPE` | Only that type (repeatable). Skips security queries |
+| `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump |
+| `--record A --security` | That type plus the security sections |
+| `--reverse IP` | PTR only |
+
+Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability. `--output` / `--format` are not in this phase (JSON/CSV comes next).
 
 Invalid input or DNS failures (NXDOMAIN on a domain, timeout) exit with code 1 and a clear error.
 
@@ -212,7 +224,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 14 — CLI polish** (`--record`, `--security`, `--all`).
+See the phase plan in the project brief. Next: **Phase 15 — JSON / CSV reporting**.
 
 ## License
 

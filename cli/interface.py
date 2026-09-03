@@ -1,12 +1,13 @@
 """CLI interface.
 
-Phase 13: records, TTL, DNSSEC, SPF, DMARC, security observations, risk score.
+Phase 14: --record, --security, --all. Default is the full report.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 
 from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
@@ -22,6 +23,36 @@ from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summa
 from analyzer.validator import DomainValidationError, normalize_domain
 
 _DEFAULT_TIMEOUT = 5.0
+_RECORD_ORDER = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
+_RECORD_TYPES = frozenset(_RECORD_ORDER)
+
+_EPILOG = """
+Examples:
+  python main.py example.com
+  python main.py example.com --record A
+  python main.py example.com --record MX --record NS
+  python main.py example.com --security
+  python main.py example.com --all
+  python main.py --reverse 8.8.8.8
+
+Default (no --record / --security) is the same as --all: every record
+type plus DNSSEC, SPF, DMARC, findings, and the local risk score.
+
+This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, or CAA
+is an observation, not proof of compromise.
+"""
+
+
+@dataclass(frozen=True)
+class ReportView:
+    """What the CLI should print after a forward lookup.
+
+    record_types is None → all core types. An empty frozenset → no record
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/findings/score.
+    """
+
+    record_types: frozenset[str] | None
+    show_security: bool
 
 
 def _ensure_utf8_stdout() -> None:
@@ -33,13 +64,37 @@ def _ensure_utf8_stdout() -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dns-analyzer",
-        description="Analyze DNS records and security signals for a domain.",
-        epilog="Forward lookup: python main.py example.com | Reverse: python main.py --reverse 8.8.8.8",
+        description=(
+            "Analyze DNS records and security signals for a domain. "
+            "Findings are configuration observations, not CVE assignments."
+        ),
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "domain",
         nargs="?",
         help="Domain name or URL (e.g. example.com or https://example.com/page)",
+    )
+    parser.add_argument(
+        "--record",
+        action="append",
+        dest="records",
+        metavar="TYPE",
+        help=(
+            "Show only this record type (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA). "
+            "Repeatable. PTR is --reverse, not --record PTR."
+        ),
+    )
+    parser.add_argument(
+        "--security",
+        action="store_true",
+        help="Show DNSSEC, SPF, DMARC, findings, and the local risk score",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Show every record type plus security analysis (default)",
     )
     parser.add_argument(
         "--reverse",
@@ -54,6 +109,67 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"DNS query timeout in seconds (default: {_DEFAULT_TIMEOUT})",
     )
     return parser
+
+
+def _normalize_record_type(raw: str) -> str | None:
+    value = raw.strip().upper()
+    if value == "PTR":
+        return None
+    if value not in _RECORD_TYPES:
+        return ""
+    return value
+
+
+def _record_type_error(raw: str) -> str:
+    if raw.strip().upper() == "PTR":
+        return "PTR is reverse DNS. Use --reverse <ip>."
+    allowed = ", ".join(_RECORD_ORDER)
+    return f"Unknown record type {raw!r}. Use one of: {allowed}."
+
+
+def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
+    """Build the print plan, or return an error string."""
+    selected: list[str] = []
+    for raw in args.records or []:
+        normalized = _normalize_record_type(raw)
+        if normalized is None or normalized == "":
+            return _record_type_error(raw)
+        if normalized not in selected:
+            selected.append(normalized)
+
+    has_filter = bool(selected)
+    if args.all and (has_filter or args.security):
+        return "Do not combine --all with --record or --security. --all is the full report."
+    if args.reverse and (has_filter or args.security or args.all):
+        return "Use either a domain (with --record/--security/--all) or --reverse, not both."
+
+    if args.all or (not has_filter and not args.security):
+        return ReportView(record_types=None, show_security=True)
+    if has_filter and args.security:
+        return ReportView(record_types=frozenset(selected), show_security=True)
+    if has_filter:
+        return ReportView(record_types=frozenset(selected), show_security=False)
+    return ReportView(record_types=frozenset(), show_security=True)
+
+
+def _selected_records(lookup: CoreLookup, types: frozenset[str] | None) -> tuple[DNSRecord, ...]:
+    if types is None:
+        return lookup.all_records()
+    buckets = {
+        "A": lookup.a,
+        "AAAA": lookup.aaaa,
+        "CNAME": lookup.cname,
+        "MX": lookup.mx,
+        "NS": lookup.ns,
+        "TXT": lookup.txt,
+        "SOA": lookup.soa,
+        "CAA": lookup.caa,
+    }
+    records: list[DNSRecord] = []
+    for label in _RECORD_ORDER:
+        if label in types:
+            records.extend(buckets[label])
+    return tuple(records)
 
 
 def _print_missing(empty_message: str, section: str, errors: tuple[tuple[str, str], ...]) -> None:
@@ -210,25 +326,40 @@ def _print_ttl_summary(records: tuple[DNSRecord, ...]) -> None:
 
 def _print_lookup(
     lookup: CoreLookup,
-    dnssec: DnssecObservation,
-    spf: SpfObservation,
-    dmarc: DmarcObservation,
-    security: SecurityReport,
+    dnssec: DnssecObservation | None,
+    spf: SpfObservation | None,
+    dmarc: DmarcObservation | None,
+    security: SecurityReport | None,
+    view: ReportView,
 ) -> None:
     errors = lookup.errors
-    _print_address_section("A RECORDS", "No A record found.", "A", lookup.a, errors)
-    _print_address_section("AAAA RECORDS", "No AAAA record found.", "AAAA", lookup.aaaa, errors)
-    _print_cname_section(lookup.cname, errors)
-    _print_mx_section(lookup.mx, errors)
-    _print_ns_section(lookup.ns, errors)
-    _print_txt_section(lookup.txt, errors)
-    _print_soa_section(lookup.soa, errors)
-    _print_caa_section(lookup.caa, errors)
-    _print_ttl_summary(lookup.all_records())
-    _print_dnssec(dnssec)
-    _print_spf(spf)
-    _print_dmarc(dmarc)
-    _print_security(security)
+    types = view.record_types
+    show_records = types is None or bool(types)
+    if show_records:
+        wanted = _RECORD_TYPES if types is None else types
+        if "A" in wanted:
+            _print_address_section("A RECORDS", "No A record found.", "A", lookup.a, errors)
+        if "AAAA" in wanted:
+            _print_address_section("AAAA RECORDS", "No AAAA record found.", "AAAA", lookup.aaaa, errors)
+        if "CNAME" in wanted:
+            _print_cname_section(lookup.cname, errors)
+        if "MX" in wanted:
+            _print_mx_section(lookup.mx, errors)
+        if "NS" in wanted:
+            _print_ns_section(lookup.ns, errors)
+        if "TXT" in wanted:
+            _print_txt_section(lookup.txt, errors)
+        if "SOA" in wanted:
+            _print_soa_section(lookup.soa, errors)
+        if "CAA" in wanted:
+            _print_caa_section(lookup.caa, errors)
+        _print_ttl_summary(_selected_records(lookup, types))
+    if view.show_security:
+        assert dnssec is not None and spf is not None and dmarc is not None and security is not None
+        _print_dnssec(dnssec)
+        _print_spf(spf)
+        _print_dmarc(dmarc)
+        _print_security(security)
 
 
 def _print_dnssec(observation: DnssecObservation) -> None:
@@ -375,17 +506,27 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 13 (risk scoring)")
+    print("DNS Analyzer — Phase 14 (CLI)")
     print()
     print("Usage: python main.py <domain>")
+    print("       python main.py <domain> --record A")
+    print("       python main.py <domain> --security")
+    print("       python main.py <domain> --all")
     print("       python main.py --reverse <ip>")
     print("Example: python main.py example.com")
     print("Example: python main.py --reverse 8.8.8.8")
+    print()
+    print("See python main.py --help for all options.")
 
 
 def run(argv: list[str] | None = None) -> int:
     _ensure_utf8_stdout()
     args = build_parser().parse_args(argv)
+
+    view = resolve_report_view(args)
+    if isinstance(view, str):
+        print(f"Error: {view}", file=sys.stderr)
+        return 1
 
     if args.reverse and args.domain:
         print("Error: Use either a domain or --reverse, not both.", file=sys.stderr)
@@ -395,6 +536,9 @@ def run(argv: list[str] | None = None) -> int:
         return _run_reverse(args.reverse, args.timeout)
 
     if not args.domain:
+        if args.records or args.security or args.all:
+            print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
+            return 1
         _print_usage()
         return 0
 
@@ -427,9 +571,15 @@ def run(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    dnssec = resolver.inspect_dnssec(domain)
-    spf = inspect_spf(lookup.txt, lookup.errors)
-    dmarc = resolver.inspect_dmarc(domain)
-    security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
-    _print_lookup(lookup, dnssec, spf, dmarc, security)
+    dnssec = None
+    spf = None
+    dmarc = None
+    security = None
+    if view.show_security:
+        dnssec = resolver.inspect_dnssec(domain)
+        spf = inspect_spf(lookup.txt, lookup.errors)
+        dmarc = resolver.inspect_dmarc(domain)
+        security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
+
+    _print_lookup(lookup, dnssec, spf, dmarc, security, view)
     return 0

@@ -2,10 +2,12 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from analyzer.dmarc import evaluate_dmarc
 from analyzer.dnssec import evaluate_dnssec
 from analyzer.models import CoreLookup, DNSRecord
-from cli.interface import run
+from cli.interface import build_parser, run
 
 
 def _lookup(
@@ -288,3 +290,129 @@ def test_cli_security_flags_private_address(mock_resolver_cls, capsys) -> None:
     output = capsys.readouterr().out
     assert "[MEDIUM] A points to a private address" in output
     assert "Scope: private" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 3600)],
+            mx=[DNSRecord("MX", "example.com", "mail.example.com", 3600, priority=10)],
+        ),
+    )
+
+    assert run(["example.com", "--record", "a"]) == 0
+    output = capsys.readouterr().out
+    assert "A RECORDS" in output
+    assert "93.184.216.34" in output
+    assert "MX RECORDS" not in output
+    assert "mail.example.com" not in output
+    assert "SECURITY ANALYSIS" not in output
+    assert "RISK SCORE" not in output
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_record_can_be_repeated(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+            mx=[DNSRecord("MX", "example.com", "mail.example.com", 60, priority=10)],
+            ns=[DNSRecord("NS", "example.com", "ns1.example.com", 86400)],
+        ),
+    )
+
+    assert run(["example.com", "--record", "MX", "--record", "NS"]) == 0
+    output = capsys.readouterr().out
+    assert "MX RECORDS" in output
+    assert "NS RECORDS" in output
+    assert "A RECORDS" not in output
+    assert "SECURITY ANALYSIS" not in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_security_flag_skips_record_dump(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+
+    assert run(["example.com", "--security"]) == 0
+    output = capsys.readouterr().out
+    assert "A RECORDS" not in output
+    assert "TTL SUMMARY" not in output
+    assert "DNSSEC" in output
+    assert "SPF" in output
+    assert "DMARC" in output
+    assert "SECURITY ANALYSIS" in output
+    assert "RISK SCORE" in output
+    mock_resolver_cls.return_value.inspect_dnssec.assert_called_once()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_record_plus_security(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+            mx=[DNSRecord("MX", "example.com", "mail.example.com", 60, priority=10)],
+        ),
+    )
+
+    assert run(["example.com", "--record", "A", "--security"]) == 0
+    output = capsys.readouterr().out
+    assert "A RECORDS" in output
+    assert "MX RECORDS" not in output
+    assert "SECURITY ANALYSIS" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_all_flag_is_full_report(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+
+    assert run(["example.com", "--all"]) == 0
+    output = capsys.readouterr().out
+    assert "A RECORDS" in output
+    assert "SECURITY ANALYSIS" in output
+    assert "RISK SCORE" in output
+
+
+def test_cli_rejects_unknown_record_type(capsys) -> None:
+    assert run(["example.com", "--record", "FOO"]) == 1
+    assert "Unknown record type" in capsys.readouterr().err
+
+
+def test_cli_record_ptr_hints_reverse(capsys) -> None:
+    assert run(["example.com", "--record", "PTR"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
+def test_cli_rejects_all_with_record(capsys) -> None:
+    assert run(["example.com", "--all", "--record", "A"]) == 1
+    assert "Do not combine --all" in capsys.readouterr().err
+
+
+def test_cli_rejects_reverse_with_security(capsys) -> None:
+    assert run(["--reverse", "8.8.8.8", "--security"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
+def test_cli_help_lists_modes() -> None:
+    help_text = build_parser().format_help()
+    assert "--record" in help_text
+    assert "--security" in help_text
+    assert "--all" in help_text
+    assert "--reverse" in help_text
+    assert "not a vulnerability scanner" in help_text.lower()
+
+
+def test_cli_help_exit_zero() -> None:
+    with pytest.raises(SystemExit) as caught:
+        run(["--help"])
+    assert caught.value.code == 0
