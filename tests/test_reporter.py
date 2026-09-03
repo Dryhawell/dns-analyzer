@@ -18,6 +18,7 @@ from utils.reporter import (
     suggested_report_path,
     write_csv,
     write_json,
+    write_report,
 )
 
 
@@ -113,3 +114,10 @@ def test_format_from_suffix() -> None:
 def test_suggested_report_path() -> None:
     path = suggested_report_path("example.com", "json", "2026-09-03")
     assert path == Path("reports") / "example_com_2026-09-03.json"
+
+
+def test_write_report_rejects_unknown_format(tmp_path: Path) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="Unsupported"):
+        write_report(tmp_path / "x.bin", _result(), "pdf")

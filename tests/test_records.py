@@ -3,6 +3,15 @@
 from analyzer.records import describe_ip_scope, format_rdata, records_from_answer
 
 
+class SimpleAnswer:
+    def __init__(self, *rdata: object, ttl: int = 300) -> None:
+        self._rdata = rdata
+        self.ttl = ttl
+
+    def __iter__(self):
+        return iter(self._rdata)
+
+
 class DummyRdata:
     def __init__(self, text: str, **attrs: object) -> None:
         self._text = text
@@ -41,6 +50,39 @@ def test_mx_value_is_exchange_only() -> None:
 def test_caa_quotes_value() -> None:
     rdata = DummyRdata("unused", flags=0, tag="issue", value="letsencrypt.org")
     assert format_rdata("CAA", rdata) == '0 issue "letsencrypt.org"'
+
+
+def test_caa_details_explain_issue_tags() -> None:
+    issue = DummyRdata("unused", flags=0, tag="issue", value="letsencrypt.org")
+    wild = DummyRdata("unused", flags=0, tag=b"issuewild", value=b"letsencrypt.org")
+    iodef = DummyRdata("unused", flags=0, tag="iodef", value="mailto:caa@example.com")
+    other = DummyRdata("unused", flags=0, tag="unknown", value="x")
+
+    issue_row = records_from_answer("CAA", "Example.COM.", SimpleAnswer(issue, ttl=3600))[0]
+    assert issue_row.name == "example.com"
+    assert "allows this CA to issue certificates" in dict(issue_row.details)["Tag"]
+
+    wild_row = records_from_answer("CAA", "example.com", SimpleAnswer(wild))[0]
+    assert wild_row.value == '0 issuewild "letsencrypt.org"'
+    assert "wildcard" in dict(wild_row.details)["Tag"]
+
+    iodef_row = records_from_answer("CAA", "example.com", SimpleAnswer(iodef))[0]
+    assert "incident report" in dict(iodef_row.details)["Tag"]
+
+    other_row = records_from_answer("CAA", "example.com", SimpleAnswer(other))[0]
+    assert other_row.details == ()
+
+
+def test_txt_joins_byte_fragments() -> None:
+    rdata = DummyRdata("unused", strings=(b"v=spf1 ", b"-all"))
+    assert format_rdata("TXT", rdata) == "v=spf1 -all"
+
+
+def test_describe_ip_scope_other_non_global() -> None:
+    assert describe_ip_scope("169.254.1.1") == "link-local"
+    assert describe_ip_scope("0.0.0.0") == "unspecified"
+    assert describe_ip_scope("224.0.0.1") == "multicast"
+    assert describe_ip_scope("not-an-ip") == "invalid"
 
 
 def test_soa_details_include_mailbox_and_timers() -> None:

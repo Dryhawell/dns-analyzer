@@ -9,6 +9,9 @@ def test_format_duration_buckets() -> None:
     assert format_duration(300) == "300s (5m)"
     assert format_duration(3600) == "3600s (1h)"
     assert format_duration(86400) == "86400s (1d)"
+    assert format_duration(-5) == "0s"
+    assert "~" in format_duration(90)
+    assert "~" in format_duration(3700)
 
 
 def test_describe_cache_is_not_a_security_rating() -> None:

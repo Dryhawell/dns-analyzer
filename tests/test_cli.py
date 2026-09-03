@@ -8,8 +8,9 @@ import pytest
 
 from analyzer.dmarc import evaluate_dmarc
 from analyzer.dnssec import evaluate_dnssec
+from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
-from cli.interface import build_parser, run
+from cli.interface import ExportPlan, build_parser, plan_export, run
 
 
 def _lookup(
@@ -515,3 +516,49 @@ def test_cli_rejects_output_txt_in_text_mode(capsys) -> None:
 def test_cli_rejects_format_output_mismatch(capsys) -> None:
     assert run(["example.com", "--format", "json", "--output", "out.csv"]) == 1
     assert "does not match" in capsys.readouterr().err
+
+
+def test_cli_usage_without_domain(capsys) -> None:
+    assert run([]) == 0
+    assert "Usage:" in capsys.readouterr().out
+
+
+def test_cli_rejects_domain_and_reverse(capsys) -> None:
+    assert run(["example.com", "--reverse", "8.8.8.8"]) == 1
+    assert "not both" in capsys.readouterr().err
+
+
+def test_cli_rejects_invalid_reverse_ip(capsys) -> None:
+    assert run(["--reverse", "not-an-ip"]) == 1
+    assert "Invalid IP" in capsys.readouterr().err
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_nxdomain_exits_one(mock_resolver_cls, capsys) -> None:
+    mock_resolver_cls.return_value.lookup_core.side_effect = DomainNotFoundError()
+    assert run(["missing.example"]) == 1
+    assert "does not exist" in capsys.readouterr().err
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_timeout_exits_one(mock_resolver_cls, capsys) -> None:
+    mock_resolver_cls.return_value.lookup_core.side_effect = DNSTimeoutError()
+    assert run(["example.com"]) == 1
+    assert "timed out" in capsys.readouterr().err
+
+
+def test_plan_export_text_is_human_only() -> None:
+    plan = plan_export("text", None)
+    assert isinstance(plan, ExportPlan)
+    assert plan.print_human is True
+    assert plan.file_format is None
+    assert plan.path is None
+
+
+def test_plan_export_json_stdout() -> None:
+    plan = plan_export("json", None)
+    assert isinstance(plan, ExportPlan)
+    assert plan.print_human is False
+    assert plan.file_format == "json"
+    assert plan.path is None

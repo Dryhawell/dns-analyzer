@@ -26,4 +26,6 @@ def test_invalid_ip_raises() -> None:
 
 def test_looks_like_ip() -> None:
     assert looks_like_ip("8.8.8.8") is True
+    assert looks_like_ip("2001:db8::1") is True
+    assert looks_like_ip(" example.com ") is False
     assert looks_like_ip("example.com") is False

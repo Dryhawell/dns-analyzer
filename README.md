@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 16 — logging to `logs/dns-analyzer.log`.
+> **Current status:** Phase 17 — unit tests (mocked DNS, no live nameservers).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -222,7 +222,11 @@ Logs are **not** the user interface. They do not go to stdout, so `--format json
 python -m pytest tests/ -q
 ```
 
-Validator, record-formatting, and resolver tests do not contact real nameservers. Resolver tests mock `dnspython`.
+Tests do **not** contact real nameservers. `dnspython` is mocked; validator, TTL, SPF, DMARC, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV, CLI flags, and logging are all local.
+
+Covered (among others): valid/invalid domains, record parsing, TTL, SPF/DMARC/CAA/DNSSEC, risk score, JSON export, NXDOMAIN/timeout CLI exits.
+
+If a test needs the network, it does not belong in this suite.
 
 ---
 
@@ -261,7 +265,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 17 — Unit testing expansion**.
+See the phase plan in the project brief. Next: **Phase 18 — Error handling improvements**.
 
 ## License
 

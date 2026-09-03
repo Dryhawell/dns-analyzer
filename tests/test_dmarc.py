@@ -77,3 +77,24 @@ def test_inspect_dmarc_timeout_is_not_detected_with_error() -> None:
 
     assert observation.status == "NOT DETECTED"
     assert observation.error is not None
+
+
+def test_inspect_dmarc_found() -> None:
+    resolver = DNSResolver(timeout=1.0)
+    resolver.resolve_txt = MagicMock(  # type: ignore[method-assign]
+        return_value=_txt("v=DMARC1; p=quarantine; rua=mailto:dmarc@example.com")
+    )
+    observation = resolver.inspect_dmarc("example.com")
+    assert observation.status == "FOUND"
+    assert observation.policy == "quarantine"
+    resolver.resolve_txt.assert_called_once_with("_dmarc.example.com")
+
+
+def test_multiple_dmarc_records() -> None:
+    observation = evaluate_dmarc(
+        "_dmarc.example.com",
+        _txt("v=DMARC1; p=none") + _txt("v=DMARC1; p=reject"),
+    )
+    assert observation.status == "FOUND"
+    assert observation.multiple_records is True
+    assert observation.policy == "none"

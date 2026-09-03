@@ -1,0 +1,24 @@
+"""Stable exception messages. No network access."""
+
+from analyzer.exceptions import (
+    DNSQueryError,
+    DNSResolutionError,
+    DNSTimeoutError,
+    DomainNotFoundError,
+    InvalidIPError,
+    NoNameserversError,
+)
+
+
+def test_user_messages_are_stable() -> None:
+    assert str(DomainNotFoundError()) == "Domain does not exist."
+    assert str(DNSTimeoutError()) == "DNS query timed out."
+    assert str(NoNameserversError()) == "No nameservers available."
+    assert str(DNSResolutionError()) == "DNS resolution error."
+    assert str(DNSQueryError()) == "DNS resolution error."
+
+
+def test_timeout_is_a_query_error() -> None:
+    assert issubclass(DNSTimeoutError, DNSQueryError)
+    assert issubclass(DomainNotFoundError, DNSQueryError)
+    assert not issubclass(InvalidIPError, DNSQueryError)

@@ -243,3 +243,54 @@ def test_cname_without_address_is_low() -> None:
     dangling = next(item for item in report.findings if "CNAME" in item.title)
     assert dangling.severity == "low"
     assert "takeover" in dangling.description.lower()
+
+
+def test_missing_caa_is_info() -> None:
+    lookup = _lookup(
+        a=[DNSRecord("A", "example.com", "93.184.216.34", 300)],
+        txt=[DNSRecord("TXT", "example.com", "v=spf1 -all", 300)],
+    )
+    report = SecurityAnalyzer().analyze(
+        lookup,
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(lookup.txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+    )
+    caa = next(item for item in report.findings if item.code == "caa_missing")
+    assert caa.severity == "info"
+
+
+def test_dmarc_p_none_is_info() -> None:
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=none", 300),
+        ]),
+    )
+    none = next(item for item in report.findings if item.code == "dmarc_p_none")
+    assert none.severity == "info"
+    assert report.highest_severity == "info"
+
+
+def test_many_txt_records_are_info() -> None:
+    txt = [DNSRecord("TXT", "example.com", f"token-{index}", 300) for index in range(9)]
+    txt[0] = DNSRecord("TXT", "example.com", "v=spf1 -all", 300)
+    lookup = _lookup(
+        a=[DNSRecord("A", "example.com", "93.184.216.34", 300)],
+        txt=txt,
+        caa=[DNSRecord("CAA", "example.com", '0 issue "letsencrypt.org"', 3600)],
+    )
+    report = SecurityAnalyzer().analyze(
+        lookup,
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(lookup.txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+    )
+    volume = next(item for item in report.findings if item.code == "txt_many")
+    assert volume.severity == "info"

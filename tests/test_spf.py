@@ -46,6 +46,20 @@ def test_multiple_spf_records() -> None:
     assert observation.multiple_records is True
 
 
+def test_spf_plus_all_and_bare_all() -> None:
+    plus = inspect_spf(_txt("v=spf1 +all"))
+    assert plus.all_term == "+all"
+    assert "unusual" in (plus.all_meaning or "")
+    bare = inspect_spf(_txt("v=spf1 all"))
+    assert bare.all_term == "all"
+
+
+def test_spf_neutral_all() -> None:
+    observation = inspect_spf(_txt("v=spf1 mx ?all"))
+    assert observation.all_term == "?all"
+    assert "neutral" in (observation.all_meaning or "")
+
+
 def test_spf_case_insensitive_prefix() -> None:
     observation = inspect_spf(_txt("V=SPF1 mx ~all"))
     assert observation.status == "FOUND"

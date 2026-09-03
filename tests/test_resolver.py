@@ -139,6 +139,15 @@ def test_lookup_core_keeps_results_if_caa_times_out(resolver: DNSResolver) -> No
     assert lookup.errors == (("CAA", "DNS query timed out."),)
 
 
+def test_lookup_core_a_nxdomain_does_not_query_later_types(resolver: DNSResolver) -> None:
+    resolver._client.resolve.side_effect = dns.resolver.NXDOMAIN()
+
+    with pytest.raises(DomainNotFoundError):
+        resolver.lookup_core("missing.example")
+
+    resolver._client.resolve.assert_called_once_with("missing.example", "A", search=False)
+
+
 def test_resolve_mx_includes_preference(resolver: DNSResolver) -> None:
     rdata = DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")
     resolver._client.resolve.return_value = _answer(rdata)
