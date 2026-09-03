@@ -2,6 +2,7 @@
 
 from unittest.mock import patch
 
+from analyzer.dmarc import evaluate_dmarc
 from analyzer.dnssec import evaluate_dnssec
 from analyzer.models import CoreLookup, DNSRecord
 from cli.interface import run
@@ -43,9 +44,17 @@ def _dnssec(
     )
 
 
-def _bind(mock_cls, lookup: CoreLookup, dnssec=None) -> None:
+def _dmarc(record: str | None = None) -> object:
+    qname = "_dmarc.example.com"
+    if record is None:
+        return evaluate_dmarc(qname, ())
+    return evaluate_dmarc(qname, [DNSRecord("TXT", qname, record, 300)])
+
+
+def _bind(mock_cls, lookup: CoreLookup, dnssec=None, dmarc=None) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
+    mock_cls.return_value.inspect_dmarc.return_value = dmarc or _dmarc()
 
 
 @patch("cli.interface.DNSResolver")
@@ -227,3 +236,20 @@ def test_cli_prints_dnssec_detected(mock_resolver_cls, capsys) -> None:
     assert "AD flag: SET" in output
     assert "does not mean the domain is compromised" in output
     assert "strip DNSKEY" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_prints_dmarc_reject(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        dmarc=_dmarc("v=DMARC1; p=reject; rua=mailto:dmarc@example.com"),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "DMARC" in output
+    assert "Status: FOUND" in output
+    assert "p=reject" in output
+    assert "_dmarc.example.com" in output
+    assert "does not mean the domain is compromised" in output

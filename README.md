@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 10 — SPF detection from TXT records.
+> **Current status:** Phase 11 — DMARC detection at `_dmarc.<domain>`.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -124,6 +124,16 @@ SPF (Sender Policy Framework) is a TXT record starting with `v=spf1`. Receiving 
 
 `NOT DETECTED` is not an automatic critical finding. This tool does not follow `include:` chains.
 
+## DMARC
+
+DMARC is a TXT record at `_dmarc.example.com` (`v=DMARC1`). It tells receivers what to do when mail is not aligned with SPF and/or DKIM.
+
+- **p=none** — monitor only; delivery is not changed
+- **p=quarantine** — typically treat failing mail as spam
+- **p=reject** — reject failing mail
+
+Missing DMARC is an observation, not an automatic critical vulnerability. DKIM needs a selector (`google._domainkey.example.com`) and is not auto-discovered in v1.
+
 ## Reverse DNS
 
 `python main.py --reverse 8.8.8.8` does **not** contact 8.8.8.8. It queries `8.8.8.8.in-addr.arpa` for a PTR record. Forward (name → IP) and reverse (IP → name) are separate zones; they do not have to match.
@@ -172,7 +182,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 11 — DMARC analysis**.
+See the phase plan in the project brief. Next: **Phase 12 — Security analysis engine**.
 
 ## License
 

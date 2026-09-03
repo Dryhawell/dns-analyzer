@@ -17,6 +17,7 @@ import dns.exception
 import dns.flags
 import dns.resolver
 
+from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 
 from analyzer.exceptions import (
@@ -122,6 +123,17 @@ class DNSResolver:
             return self.resolve_ptr(qname)
         except DomainNotFoundError:
             return []
+
+    def inspect_dmarc(self, name: str) -> DmarcObservation:
+        """TXT lookup at _dmarc.<name>. NXDOMAIN means not published."""
+        qname = dmarc_query_name(name)
+        try:
+            records = self.resolve_txt(qname)
+        except DomainNotFoundError:
+            return evaluate_dmarc(qname, ())
+        except DNSQueryError as exc:
+            return evaluate_dmarc(qname, (), error=str(exc))
+        return evaluate_dmarc(qname, records)
 
     def inspect_dnssec(self, name: str) -> DnssecObservation:
         """Look for DNSKEY/DS and the AD flag. Failures become observations."""

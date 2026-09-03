@@ -1,5 +1,6 @@
 """Core DNS analysis package."""
 
+from analyzer.dmarc import DmarcObservation, evaluate_dmarc
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
     DNSQueryError,
@@ -31,5 +32,6 @@ __all__ = [
     "looks_like_ip",
     "normalize_domain",
     "SpfObservation",
-    "inspect_spf",
+    "DmarcObservation",
+    "evaluate_dmarc",
 ]

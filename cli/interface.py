@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 10: records, TTL, DNSSEC detection, SPF from TXT.
+Phase 11: records, TTL, DNSSEC, SPF, DMARC.
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import DNSQueryError, InvalidIPError
 from analyzer.models import CoreLookup, DNSRecord
@@ -205,7 +206,7 @@ def _print_ttl_summary(records: tuple[DNSRecord, ...]) -> None:
     print()
 
 
-def _print_lookup(lookup: CoreLookup, dnssec: DnssecObservation) -> None:
+def _print_lookup(lookup: CoreLookup, dnssec: DnssecObservation, dmarc: DmarcObservation) -> None:
     errors = lookup.errors
     _print_address_section("A RECORDS", "No A record found.", "A", lookup.a, errors)
     _print_address_section("AAAA RECORDS", "No AAAA record found.", "AAAA", lookup.aaaa, errors)
@@ -218,6 +219,7 @@ def _print_lookup(lookup: CoreLookup, dnssec: DnssecObservation) -> None:
     _print_ttl_summary(lookup.all_records())
     _print_dnssec(dnssec)
     _print_spf(inspect_spf(lookup.txt, lookup.errors))
+    _print_dmarc(dmarc)
 
 
 def _print_dnssec(observation: DnssecObservation) -> None:
@@ -245,6 +247,33 @@ def _print_spf(observation: SpfObservation) -> None:
             print(f"all: {observation.all_term} ({observation.all_meaning})")
         if observation.multiple_records:
             print("Note: multiple v=spf1 TXT records (RFC 7208 expects one).")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_dmarc(observation: DmarcObservation) -> None:
+    print("DMARC")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.record:
+        print("Policy record:")
+        print(observation.record)
+        if observation.policy:
+            meaning = observation.policy_meaning or ""
+            extra = f" ({meaning})" if meaning else ""
+            print(f"p={observation.policy}{extra}")
+        if observation.subdomain_policy:
+            print(f"sp={observation.subdomain_policy}")
+        if observation.pct:
+            print(f"pct={observation.pct}")
+        if observation.rua:
+            print(f"rua={observation.rua}")
+        if observation.multiple_records:
+            print("Note: multiple v=DMARC1 TXT records (receivers may ignore DMARC).")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -294,7 +323,7 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 10 (SPF)")
+    print("DNS Analyzer — Phase 11 (DMARC)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py --reverse <ip>")
@@ -347,5 +376,6 @@ def run(argv: list[str] | None = None) -> int:
         return 1
 
     dnssec = resolver.inspect_dnssec(domain)
-    _print_lookup(lookup, dnssec)
+    dmarc = resolver.inspect_dmarc(domain)
+    _print_lookup(lookup, dnssec, dmarc)
     return 0
