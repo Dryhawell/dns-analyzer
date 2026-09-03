@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 15 — JSON / CSV export (`--format`, `--output`).
+> **Current status:** Phase 16 — logging to `logs/dns-analyzer.log`.
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -39,7 +39,8 @@ Three layers:
 - Security findings with severity, description, recommendation
 - Transparent risk score (local heuristic; not CVSS)
 - JSON / CSV reports
-- Logging and unit tests with mocks
+- File logging (`logs/dns-analyzer.log`; no secrets or rdata)
+- Unit tests with mocks
 
 **Not in v1:** GUI, aggressive subdomain brute-force, WHOIS, geolocation, HTML/PDF reports.
 
@@ -196,6 +197,21 @@ python main.py example.com --output reports/example_com.json
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
+## Logging
+
+Each real analysis writes diagnostics to `logs/dns-analyzer.log` (gitignored, rotating, 1 MB × 3 backups).
+
+Typical lines:
+
+```
+INFO  DNS analysis started target=example.com
+INFO  Querying A record for example.com
+WARNING  DNS query timeout for CAA example.com
+ERROR  Invalid domain
+```
+
+Logs are **not** the user interface. They do not go to stdout, so `--format json` stays pipe-clean. Record values (A addresses, TXT tokens, SPF strings) are not written — only the name, type, and count. Do not paste log files that might contain internal hostnames into a public gist without review.
+
 ## Reverse DNS
 
 `python main.py --reverse 8.8.8.8` does **not** contact 8.8.8.8. It queries `8.8.8.8.in-addr.arpa` for a PTR record. Forward (name → IP) and reverse (IP → name) are separate zones; they do not have to match.
@@ -245,7 +261,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 16 — Logging**.
+See the phase plan in the project brief. Next: **Phase 17 — Unit testing expansion**.
 
 ## License
 

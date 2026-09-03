@@ -30,8 +30,10 @@ from analyzer.exceptions import (
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import records_from_answer
 from analyzer.reverse import ptr_name
+from utils.logger import get_logger
 
 _DEFAULT_TIMEOUT = 5.0
+_log = get_logger("resolver")
 
 
 class DNSResolver:
@@ -162,17 +164,21 @@ class DNSResolver:
         rdtype: str,
         errors: list[str],
     ) -> tuple[bool, bool]:
+        _log.info("Querying %s record for %s", rdtype, name)
         try:
             answer = client.resolve(name, rdtype, search=False)
         except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
             return False, False
         except (dns.resolver.LifetimeTimeout, dns.exception.Timeout):
+            _log.warning("DNS query timeout for %s %s", rdtype, name)
             errors.append(f"{rdtype} query timed out")
             return False, False
         except dns.resolver.NoNameservers:
+            _log.warning("No nameservers for %s %s", rdtype, name)
             errors.append(f"{rdtype} query had no nameservers")
             return False, False
         except dns.exception.DNSException:
+            _log.warning("DNS query failed for %s %s", rdtype, name)
             errors.append(f"{rdtype} query failed")
             return False, False
 
@@ -186,17 +192,24 @@ class DNSResolver:
         search=False prevents Windows/Linux search suffixes from turning
         example.com into example.com.company.local.
         """
+        _log.info("Querying %s record for %s", record_type, name)
         try:
             answer = self._client.resolve(name, record_type, search=False)
         except dns.resolver.NXDOMAIN as exc:
+            _log.info("NXDOMAIN for %s %s", record_type, name)
             raise DomainNotFoundError() from exc
         except dns.resolver.NoAnswer:
             return []
         except dns.resolver.NoNameservers as exc:
+            _log.warning("No nameservers for %s %s", record_type, name)
             raise NoNameserversError() from exc
         except (dns.resolver.LifetimeTimeout, dns.exception.Timeout) as exc:
+            _log.warning("DNS query timeout for %s %s", record_type, name)
             raise DNSTimeoutError() from exc
         except dns.exception.DNSException as exc:
+            _log.warning("DNS query failed for %s %s", record_type, name)
             raise DNSResolutionError() from exc
 
-        return records_from_answer(record_type, name, answer)
+        records = records_from_answer(record_type, name, answer)
+        _log.info("Received %s %s record(s) for %s", len(records), record_type, name)
+        return records

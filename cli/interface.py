@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 15: --format json|csv|text and --output PATH.
+Phase 16: logging to logs/dns-analyzer.log (not stdout).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
+from utils.logger import configure_logging, get_logger
 from utils.reporter import (
     dumps_csv,
     dumps_json,
@@ -35,6 +36,7 @@ from utils.reporter import (
 _DEFAULT_TIMEOUT = 5.0
 _RECORD_ORDER = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
 _RECORD_TYPES = frozenset(_RECORD_ORDER)
+_log = get_logger("cli")
 
 _EPILOG = """
 Examples:
@@ -220,12 +222,15 @@ def _emit_export(result: DNSAnalysisResult, export: ExportPlan) -> str | None:
     try:
         if export.path is not None:
             write_report(export.path, result, export.file_format)
+            _log.info("Wrote report %s", export.path)
             print(f"Wrote {export.path}", file=sys.stderr)
             return None
         text = dumps_json(result) if export.file_format == "json" else dumps_csv(result)
         sys.stdout.write(text)
+        _log.info("Wrote %s report to stdout", export.file_format)
         return None
     except OSError as exc:
+        _log.error("Could not write report")
         return f"Could not write report: {exc}"
 
 
@@ -563,24 +568,34 @@ def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
 
 
 def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
+    configure_logging()
     try:
         addr = parse_ip(ip_raw)
     except InvalidIPError as exc:
+        _log.error("Invalid IP for reverse lookup")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     ip_text = str(addr)
     qname = ptr_name(ip_text)
+    _log.info("DNS analysis started target=%s mode=reverse", ip_text)
     started = time.perf_counter()
     scan_time = datetime.now(timezone.utc).isoformat()
     resolver = DNSResolver(timeout=timeout)
     try:
         records = resolver.resolve_reverse(ip_text)
     except DNSQueryError as exc:
+        _log.error("DNS analysis failed target=%s reason=%s", ip_text, exc)
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+    _log.info(
+        "DNS analysis finished target=%s duration_ms=%s records=%s",
+        ip_text,
+        duration_ms,
+        len(records),
+    )
     result = DNSAnalysisResult(
         target=ip_text,
         mode="reverse",
@@ -601,7 +616,7 @@ def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 15 (JSON / CSV)")
+    print("DNS Analyzer — Phase 16 (logging)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
@@ -621,11 +636,15 @@ def run(argv: list[str] | None = None) -> int:
 
     view = resolve_report_view(args)
     if isinstance(view, str):
+        configure_logging()
+        _log.error("Invalid CLI options")
         print(f"Error: {view}", file=sys.stderr)
         return 1
 
     export = plan_export(args.export_format, args.output)
     if isinstance(export, str):
+        configure_logging()
+        _log.error("Invalid CLI options")
         print(f"Error: {export}", file=sys.stderr)
         return 1
 
@@ -645,6 +664,8 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     if looks_like_ip(args.domain):
+        configure_logging()
+        _log.error("Positional argument looks like an IP address")
         print(
             "Error: That looks like an IP address. Use --reverse "
             f"{args.domain.strip()}",
@@ -655,9 +676,13 @@ def run(argv: list[str] | None = None) -> int:
     try:
         domain = normalize_domain(args.domain)
     except DomainValidationError as exc:
+        configure_logging()
+        _log.error("Invalid domain")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    configure_logging()
+    _log.info("DNS analysis started target=%s mode=forward", domain)
     started = time.perf_counter()
     scan_time = datetime.now(timezone.utc).isoformat()
     resolver = DNSResolver(timeout=args.timeout)
@@ -665,6 +690,7 @@ def run(argv: list[str] | None = None) -> int:
     try:
         lookup = resolver.lookup_core(domain)
     except DNSQueryError as exc:
+        _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -679,6 +705,12 @@ def run(argv: list[str] | None = None) -> int:
         security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
 
     duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+    _log.info(
+        "DNS analysis finished target=%s duration_ms=%s records=%s",
+        domain,
+        duration_ms,
+        len(lookup.all_records()),
+    )
     result = DNSAnalysisResult(
         target=domain,
         mode="forward",

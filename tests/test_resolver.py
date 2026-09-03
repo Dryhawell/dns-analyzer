@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -172,11 +173,29 @@ def test_nxdomain_raises(resolver: DNSResolver) -> None:
         resolver.resolve_a("no-such-domain.example")
 
 
-def test_timeout_raises(resolver: DNSResolver) -> None:
+def test_timeout_raises(resolver: DNSResolver, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger="dns_analyzer.resolver")
     resolver._client.resolve.side_effect = dns.exception.Timeout()
 
     with pytest.raises(DNSTimeoutError, match="timed out"):
         resolver.resolve_ns("example.com")
+
+    assert "Querying NS record for example.com" in caplog.text
+    assert "DNS query timeout for NS example.com" in caplog.text
+
+
+def test_query_log_does_not_include_rdata(
+    resolver: DNSResolver, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="dns_analyzer.resolver")
+    resolver._client.resolve.return_value = _answer(DummyRdata("93.184.216.34"))
+
+    records = resolver.resolve_a("example.com")
+
+    assert records[0].value == "93.184.216.34"
+    assert "Querying A record for example.com" in caplog.text
+    assert "Received 1 A record(s) for example.com" in caplog.text
+    assert "93.184.216.34" not in caplog.text
 
 
 def test_no_nameservers_raises(resolver: DNSResolver) -> None:
