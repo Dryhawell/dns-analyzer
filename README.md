@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 11 — DMARC detection at `_dmarc.<domain>`.
+> **Current status:** Phase 12 — security analysis engine (observations, not CVEs).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -134,6 +134,14 @@ DMARC is a TXT record at `_dmarc.example.com` (`v=DMARC1`). It tells receivers w
 
 Missing DMARC is an observation, not an automatic critical vulnerability. DKIM needs a selector (`google._domainkey.example.com`) and is not auto-discovered in v1.
 
+## Security analysis
+
+After records and policy sections, the CLI prints **SECURITY ANALYSIS**. Each finding has a severity (`info` / `low` / `medium`), a title, a description, and a recommendation.
+
+This engine **does not assign CVEs**. Missing DNSSEC, SPF, DMARC, or CAA is a configuration signal. `p=none` is a weak/monitor policy, not a critical hole. `+all` and multiple SPF/DMARC records are treated as configuration issues. A private or loopback A/AAAA on a name is flagged as likely misconfiguration, not proof of a breach. A CNAME with no A/AAAA in this resolver view is a possible dangling alias — not an automatic takeover.
+
+There is **no risk score yet** (Phase 13).
+
 ## Reverse DNS
 
 `python main.py --reverse 8.8.8.8` does **not** contact 8.8.8.8. It queries `8.8.8.8.in-addr.arpa` for a PTR record. Forward (name → IP) and reverse (IP → name) are separate zones; they do not have to match.
@@ -182,7 +190,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 12 — Security analysis engine**.
+See the phase plan in the project brief. Next: **Phase 13 — Risk scoring** (transparent, non-standard; DNSSEC absence is not over-penalized).
 
 ## License
 

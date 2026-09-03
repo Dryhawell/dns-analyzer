@@ -253,3 +253,32 @@ def test_cli_prints_dmarc_reject(mock_resolver_cls, capsys) -> None:
     assert "p=reject" in output
     assert "_dmarc.example.com" in output
     assert "does not mean the domain is compromised" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_prints_security_observations(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "SECURITY ANALYSIS" in output
+    assert "[LOW] SPF not published" in output
+    assert "[LOW] DMARC not published" in output
+    assert "[HIGH]" not in output
+    assert "not vulnerability scanner results" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_security_flags_private_address(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "intranet.example", "10.0.0.5", 60)]),
+    )
+
+    assert run(["intranet.example"]) == 0
+    output = capsys.readouterr().out
+    assert "[MEDIUM] A points to a private address" in output
+    assert "Scope: private" in output

@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 11: records, TTL, DNSSEC, SPF, DMARC.
+Phase 12: records, TTL, DNSSEC, SPF, DMARC, security observations.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
 from analyzer.reverse import looks_like_ip, parse_ip, ptr_name
+from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
@@ -206,7 +207,13 @@ def _print_ttl_summary(records: tuple[DNSRecord, ...]) -> None:
     print()
 
 
-def _print_lookup(lookup: CoreLookup, dnssec: DnssecObservation, dmarc: DmarcObservation) -> None:
+def _print_lookup(
+    lookup: CoreLookup,
+    dnssec: DnssecObservation,
+    spf: SpfObservation,
+    dmarc: DmarcObservation,
+    security: SecurityReport,
+) -> None:
     errors = lookup.errors
     _print_address_section("A RECORDS", "No A record found.", "A", lookup.a, errors)
     _print_address_section("AAAA RECORDS", "No AAAA record found.", "AAAA", lookup.aaaa, errors)
@@ -218,8 +225,9 @@ def _print_lookup(lookup: CoreLookup, dnssec: DnssecObservation, dmarc: DmarcObs
     _print_caa_section(lookup.caa, errors)
     _print_ttl_summary(lookup.all_records())
     _print_dnssec(dnssec)
-    _print_spf(inspect_spf(lookup.txt, lookup.errors))
+    _print_spf(spf)
     _print_dmarc(dmarc)
+    _print_security(security)
 
 
 def _print_dnssec(observation: DnssecObservation) -> None:
@@ -281,6 +289,31 @@ def _print_dmarc(observation: DmarcObservation) -> None:
     print()
 
 
+def _print_security(report: SecurityReport) -> None:
+    print("SECURITY ANALYSIS")
+    print("────────────────────────")
+    if not report.findings:
+        print("No findings from this pass.")
+        print()
+        print(report.disclaimer)
+        print()
+        return
+
+    print(f"Findings: {len(report.findings)}")
+    print()
+    for finding in report.findings:
+        _print_finding(finding)
+    print(report.disclaimer)
+    print()
+
+
+def _print_finding(finding: SecurityFinding) -> None:
+    print(f"[{finding.severity.upper()}] {finding.title}")
+    print(finding.description)
+    print(f"Recommendation: {finding.recommendation}")
+    print()
+
+
 def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
     print("REVERSE DNS")
     print("────────────────────────")
@@ -323,7 +356,7 @@ def _run_reverse(ip_raw: str, timeout: float) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 11 (DMARC)")
+    print("DNS Analyzer — Phase 12 (security analysis)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py --reverse <ip>")
@@ -376,6 +409,8 @@ def run(argv: list[str] | None = None) -> int:
         return 1
 
     dnssec = resolver.inspect_dnssec(domain)
+    spf = inspect_spf(lookup.txt, lookup.errors)
     dmarc = resolver.inspect_dmarc(domain)
-    _print_lookup(lookup, dnssec, dmarc)
+    security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
+    _print_lookup(lookup, dnssec, spf, dmarc, security)
     return 0
