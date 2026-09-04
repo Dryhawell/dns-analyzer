@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 19: query only needed types; parallel remaining lookups.
+Phase 20: optional multi-resolver comparison from a JSON config (no hardcoded IPs).
 """
 
 from __future__ import annotations
@@ -14,6 +14,21 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from analyzer.compare import (
+    ResolverComparison,
+    compare_snapshots,
+    empty_snapshot,
+    snapshot_from_lookup,
+    types_for_comparison,
+)
+from analyzer.config import (
+    ResolverSettings,
+    load_resolver_file,
+    nameserver_arg,
+    os_default_settings,
+    select_resolvers,
+    settings_from_nameservers,
+)
 from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
@@ -23,6 +38,7 @@ from analyzer.exceptions import (
     DomainNotFoundError,
     InvalidIPError,
     NoNameserversError,
+    ResolverConfigError,
 )
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.records import describe_ip_scope
@@ -57,6 +73,7 @@ Examples:
   python main.py example.com --security
   python main.py example.com --format json
   python main.py example.com --output reports/example_com.json
+  python main.py example.com --config config/resolvers.example.json
   python main.py --reverse 8.8.8.8 --format csv
 
 Default (no --record / --security) is the same as --all: every record
@@ -154,6 +171,32 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Write JSON or CSV to this path. With --format text, suffix must be .json or .csv",
     )
+    parser.add_argument(
+        "--config",
+        dest="config_path",
+        metavar="PATH",
+        help=(
+            "JSON file listing named recursive resolvers (see config/resolvers.example.json). "
+            "Two or more entries compare A/AAAA. IPs are not hard-coded in the program."
+        ),
+    )
+    parser.add_argument(
+        "--resolver",
+        action="append",
+        dest="resolver_names",
+        metavar="NAME",
+        help="Use this named resolver from --config. Repeatable. Order is the compare order",
+    )
+    parser.add_argument(
+        "--nameserver",
+        action="append",
+        dest="nameservers",
+        metavar="IP",
+        help=(
+            "Query this recursive resolver IP instead of the OS list. Repeatable. "
+            "Do not combine with --config."
+        ),
+    )
     return parser
 
 
@@ -233,6 +276,26 @@ def plan_export(export_format: str, output: str | None) -> ExportPlan | str:
             return f"--format {export_format} does not match output suffix {path.suffix}."
         return ExportPlan(print_human=False, file_format=export_format, path=path)
     return ExportPlan(print_human=False, file_format=export_format, path=None)
+
+
+def settings_from_args(args: argparse.Namespace) -> ResolverSettings | str:
+    """OS resolver, --nameserver list, or --config file. Returns an error string."""
+    has_config = bool(args.config_path)
+    has_ips = bool(args.nameservers)
+    has_names = bool(args.resolver_names)
+    if has_config and has_ips:
+        return "Use either --config or --nameserver, not both."
+    if has_names and not has_config:
+        return "Use --resolver with --config."
+    try:
+        if has_ips:
+            return settings_from_nameservers(args.nameservers)
+        if has_config:
+            loaded = load_resolver_file(Path(args.config_path))
+            return select_resolvers(loaded, args.resolver_names)
+        return os_default_settings()
+    except ResolverConfigError as exc:
+        return str(exc)
 
 
 def _timeout_error(value: float) -> str | None:
@@ -600,6 +663,36 @@ def _print_risk(risk: RiskScore) -> None:
     print()
 
 
+def _print_comparison(comparison: ResolverComparison) -> None:
+    print("RESOLVER COMPARISON")
+    print("────────────────────────")
+    print(f"Primary: {comparison.primary}")
+    extras = [item.name for item in comparison.snapshots[1:]]
+    if extras:
+        print(f"Compared: {', '.join(extras)}")
+    print(f"Status: {comparison.status}")
+    if comparison.inconsistent_types:
+        print("Potential DNS inconsistency: " + ", ".join(comparison.inconsistent_types))
+    print()
+    labels: list[str] = []
+    for item in comparison.snapshots:
+        for label in item.answers:
+            if label not in labels:
+                labels.append(label)
+    for label in labels:
+        print(label)
+        for item in comparison.snapshots:
+            if item.error:
+                shown = f"(error: {item.error})"
+            else:
+                values = item.answers.get(label, ())
+                shown = ", ".join(values) if values else "(none)"
+            print(f"  {item.name}: {shown}")
+        print()
+    print(comparison.note)
+    print()
+
+
 def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
     print("REVERSE DNS")
     print("────────────────────────")
@@ -621,7 +714,49 @@ def _print_reverse(ip: str, ptr_qname: str, records: list[DNSRecord]) -> None:
     _print_ttl_summary(tuple(records))
 
 
-def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
+def _compare_with_extras(
+    domain: str,
+    primary_lookup: CoreLookup,
+    settings: ResolverSettings,
+    timeout: float,
+    compare_types: tuple[str, ...],
+) -> ResolverComparison | None:
+    """Query extra resolvers for A/AAAA only. Failures become snapshots, not aborts."""
+    if not settings.extras or not compare_types:
+        return None
+    snapshots = [
+        snapshot_from_lookup(
+            settings.primary.name,
+            primary_lookup,
+            compare_types,
+            settings.primary.nameservers,
+        )
+    ]
+    for extra in settings.extras:
+        if settings.delay_seconds:
+            time.sleep(settings.delay_seconds)
+        _log.info("Querying extra resolver name=%s", extra.name)
+        client = DNSResolver(timeout=timeout, nameservers=nameserver_arg(extra))
+        try:
+            lookup = client.lookup_core(domain, types=compare_types)
+        except DNSQueryError as exc:
+            _log.warning("Extra resolver %s failed", extra.name)
+            snapshots.append(
+                empty_snapshot(extra.name, compare_types, extra.nameservers, str(exc))
+            )
+            continue
+        snapshots.append(
+            snapshot_from_lookup(extra.name, lookup, compare_types, extra.nameservers)
+        )
+    return compare_snapshots(snapshots, compare_types)
+
+
+def _run_reverse(
+    ip_raw: str,
+    timeout: float,
+    export: ExportPlan,
+    nameservers: list[str] | None = None,
+) -> int:
     configure_logging()
     try:
         addr = parse_ip(ip_raw)
@@ -635,7 +770,7 @@ def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
     _log.info("DNS analysis started target=%s mode=reverse", ip_text)
     started = time.perf_counter()
     scan_time = datetime.now(timezone.utc).isoformat()
-    resolver = DNSResolver(timeout=timeout)
+    resolver = DNSResolver(timeout=timeout, nameservers=nameservers)
     try:
         records = resolver.resolve_reverse(ip_text)
     except DNSQueryError as exc:
@@ -670,13 +805,14 @@ def _run_reverse(ip_raw: str, timeout: float, export: ExportPlan) -> int:
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 19 (query performance)")
+    print("DNS Analyzer — Phase 20 (multi-resolver comparison)")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
     print("       python main.py <domain> --security")
     print("       python main.py <domain> --format json")
     print("       python main.py <domain> --output reports/example.json")
+    print("       python main.py <domain> --config config/resolvers.example.json")
     print("       python main.py --reverse <ip>")
     print("Example: python main.py example.com")
     print("Example: python main.py --reverse 8.8.8.8")
@@ -728,15 +864,37 @@ def _run(argv: list[str] | None = None) -> int:
         print(f"Error: {export}", file=sys.stderr)
         return 1
 
+    settings = settings_from_args(args)
+    if isinstance(settings, str):
+        configure_logging()
+        _log.error("Invalid CLI options")
+        print(f"Error: {settings}", file=sys.stderr)
+        return 1
+
     if args.reverse and args.domain:
         print("Error: Use either a domain or --reverse, not both.", file=sys.stderr)
         return 1
 
     if args.reverse:
-        return _run_reverse(args.reverse, args.timeout, export)
+        if settings.extras:
+            _log.info("Reverse lookup uses only the primary resolver")
+        return _run_reverse(
+            args.reverse,
+            args.timeout,
+            export,
+            nameserver_arg(settings.primary),
+        )
 
     if not args.domain:
-        extra = args.records or args.security or args.all or args.output
+        extra = (
+            args.records
+            or args.security
+            or args.all
+            or args.output
+            or args.config_path
+            or args.nameservers
+            or args.resolver_names
+        )
         if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
             return 1
@@ -762,10 +920,17 @@ def _run(argv: list[str] | None = None) -> int:
         return 1
 
     configure_logging()
-    _log.info("DNS analysis started target=%s mode=forward", domain)
+    _log.info(
+        "DNS analysis started target=%s mode=forward resolver=%s",
+        domain,
+        settings.primary.name,
+    )
     started = time.perf_counter()
     scan_time = datetime.now(timezone.utc).isoformat()
-    resolver = DNSResolver(timeout=args.timeout)
+    resolver = DNSResolver(
+        timeout=args.timeout,
+        nameservers=nameserver_arg(settings.primary),
+    )
     needed = types_to_query(view)
 
     try:
@@ -793,6 +958,14 @@ def _run(argv: list[str] | None = None) -> int:
         _print_dns_failure(exc, domain)
         return 1
 
+    comparison = _compare_with_extras(
+        domain,
+        lookup,
+        settings,
+        args.timeout,
+        types_for_comparison(needed),
+    )
+
     duration_ms = max(0, int((time.perf_counter() - started) * 1000))
     _log.info(
         "DNS analysis finished target=%s duration_ms=%s records=%s",
@@ -816,6 +989,7 @@ def _run(argv: list[str] | None = None) -> int:
         security=security,
         view_record_types=_view_record_types(view),
         view_security=view.show_security,
+        comparison=comparison,
     )
 
     if export.print_human:
@@ -825,7 +999,13 @@ def _run(argv: list[str] | None = None) -> int:
         print("Target:")
         print(domain)
         print()
+        if args.config_path or args.nameservers:
+            print("Resolver:")
+            print(settings.primary.name)
+            print()
         _print_lookup(lookup, dnssec, spf, dmarc, security, view)
+        if comparison is not None:
+            _print_comparison(comparison)
 
     error = _emit_export(result, export)
     if error:

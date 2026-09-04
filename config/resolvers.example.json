@@ -1,0 +1,13 @@
+{
+  "delay_seconds": 0,
+  "resolvers": [
+    {
+      "name": "system",
+      "nameservers": []
+    },
+    {
+      "name": "secondary",
+      "nameservers": ["203.0.113.53"]
+    }
+  ]
+}

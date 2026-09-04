@@ -33,3 +33,6 @@ logs/*
 # Secrets (none expected in v1, still ignored)
 .env
 .env.*
+
+# Local resolver list (copy from config/resolvers.example.json)
+config/resolvers.json

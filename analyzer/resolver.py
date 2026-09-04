@@ -5,8 +5,8 @@ dnspython does not "look up a website". It builds a DNS query message
 answer is truncated), and parses the binary response into Python objects.
 
 By default we use the operating system's resolver list (the same path
-nslookup uses). Nameserver IPs are not hard-coded; later phases can pass
-a config-driven list into DNSResolver(nameservers=...).
+nslookup uses). Nameserver IPs are not hard-coded; pass them via
+DNSResolver(nameservers=...) or a JSON config file (Phase 20).
 """
 
 from __future__ import annotations

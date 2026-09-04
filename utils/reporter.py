@@ -11,6 +11,7 @@ import io
 import json
 from pathlib import Path
 
+from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import DNSRecord
@@ -58,6 +59,8 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
     }
     if result.ptr_query is not None:
         payload["ptr_query"] = result.ptr_query
+    if result.comparison is not None:
+        payload["resolver_comparison"] = _comparison_dict(result.comparison)
     return payload
 
 
@@ -198,5 +201,23 @@ def _risk_dict(risk: RiskScore) -> dict[str, object]:
         "contributions": [
             {"code": item.code, "label": item.label, "points": item.points}
             for item in risk.contributions
+        ],
+    }
+
+
+def _comparison_dict(comparison: ResolverComparison) -> dict[str, object]:
+    return {
+        "primary": comparison.primary,
+        "status": comparison.status,
+        "inconsistent_types": list(comparison.inconsistent_types),
+        "note": comparison.note,
+        "resolvers": [
+            {
+                "name": item.name,
+                "nameservers": list(item.nameservers),
+                "records": {label: list(values) for label, values in item.answers.items()},
+                "error": item.error,
+            }
+            for item in comparison.snapshots
         ],
     }

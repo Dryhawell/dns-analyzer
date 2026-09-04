@@ -48,3 +48,7 @@ class DNSNetworkError(DNSQueryError):
 
 class InvalidIPError(ValueError):
     """Raised when --reverse input is not an IPv4 or IPv6 address."""
+
+
+class ResolverConfigError(ValueError):
+    """Invalid resolver config file or CLI resolver options."""

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import DNSRecord
@@ -32,3 +33,4 @@ class DNSAnalysisResult:
     ptr_query: str | None = None
     view_record_types: tuple[str, ...] | None = None
     view_security: bool = True
+    comparison: ResolverComparison | None = None

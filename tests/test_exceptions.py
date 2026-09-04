@@ -8,6 +8,7 @@ from analyzer.exceptions import (
     DomainNotFoundError,
     InvalidIPError,
     NoNameserversError,
+    ResolverConfigError,
 )
 
 
@@ -25,3 +26,4 @@ def test_timeout_is_a_query_error() -> None:
     assert issubclass(DomainNotFoundError, DNSQueryError)
     assert issubclass(DNSNetworkError, DNSQueryError)
     assert not issubclass(InvalidIPError, DNSQueryError)
+    assert not issubclass(ResolverConfigError, DNSQueryError)

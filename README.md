@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI for learning DNS, DNS security signals, and network behavior.
 
-> **Current status:** Phase 19 — query only needed record types; remaining types after A may run in parallel.
+> **Current status:** Phase 20 — optional multi-resolver comparison (config file, no hardcoded IPs).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -77,6 +77,8 @@ python main.py example.com --timeout 3
 python main.py example.com --format json
 python main.py example.com --output reports/example_com.json
 python main.py example.com --format csv --output reports/example_com.csv
+python main.py example.com --config config/resolvers.example.json
+python main.py example.com --nameserver 192.0.2.53
 python main.py --reverse 8.8.8.8 --format json
 ```
 
@@ -89,10 +91,15 @@ python main.py --reverse 8.8.8.8 --format json
 | `--reverse IP` | PTR only |
 | `--format json` / `csv` | Machine-readable stdout (no human dump) |
 | `--output PATH` | Write `.json` or `.csv`; with default text mode the human report still prints |
+| `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
+| `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
+| `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
 
 Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). CSV is a flat table: `record_type,name,value,ttl,priority`. `--record A` **queries only A** (existence check is A itself); JSON/CSV contain collected records, not hidden extras.
+JSON includes `schema` (`dns-analyzer.report.v1`), `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`. CSV is a flat table: `record_type,name,value,ttl,priority`. `--record A` **queries only A** (existence check is A itself); JSON/CSV contain collected records, not hidden extras.
+
+Copy `config/resolvers.example.json` and replace placeholder IPs with recursive resolvers you are allowed to query. The program does **not** ship Google/Cloudflare addresses in code. Different A/AAAA answers are labeled *Potential DNS inconsistency*; that can be geo-DNS, anycast, cache lag, or split-horizon — not proof of hijacking. Extra resolvers are queried sequentially (optional `delay_seconds` in the JSON file).
 
 Invalid input or DNS failures (NXDOMAIN on a domain, timeout, network error) exit with code 1 and a clear message. The program does not print a traceback for those cases. Ctrl+C exits 130 (`Interrupted.`). `--timeout` must be between 0 (exclusive) and 120 seconds.
 
@@ -265,7 +272,7 @@ Only analyze domains you own or have permission to test. Do not use enumeration 
 
 ## Roadmap
 
-See the phase plan in the project brief. Next: **Phase 20 — Optional multi-resolver (config, no hardcoded IPs)**.
+See the phase plan in the project brief. Next: **Phase 21 — Documentation**.
 
 ## License
 

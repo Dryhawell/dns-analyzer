@@ -429,6 +429,9 @@ def test_cli_help_lists_modes() -> None:
     assert "--reverse" in help_text
     assert "--format" in help_text
     assert "--output" in help_text
+    assert "--config" in help_text
+    assert "--nameserver" in help_text
+    assert "--resolver" in help_text
     assert "not a vulnerability scanner" in help_text.lower()
 
 
@@ -643,3 +646,114 @@ def test_types_to_query_security_skips_mx_ns_soa() -> None:
 def test_types_to_query_record_plus_security() -> None:
     view = ReportView(record_types=frozenset({"MX"}), show_security=True)
     assert types_to_query(view) == ("A", "AAAA", "CNAME", "MX", "TXT", "CAA")
+
+
+def test_cli_rejects_config_with_nameserver(capsys) -> None:
+    assert run(["example.com", "--config", "x.json", "--nameserver", "192.0.2.1"]) == 1
+    assert "either --config or --nameserver" in capsys.readouterr().err
+
+
+def test_cli_resolver_requires_config(capsys) -> None:
+    assert run(["example.com", "--resolver", "lab"]) == 1
+    assert "--config" in capsys.readouterr().err
+
+
+def test_cli_config_missing_file(tmp_path: Path, capsys) -> None:
+    missing = tmp_path / "nope.json"
+    assert run(["example.com", "--config", str(missing)]) == 1
+    assert "Could not read" in capsys.readouterr().err
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_nameserver_overrides_os_resolver(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+
+    assert run(["example.com", "--nameserver", "192.0.2.53", "--record", "A"]) == 0
+    mock_resolver_cls.assert_called_with(timeout=5.0, nameservers=["192.0.2.53"])
+    output = capsys.readouterr().out
+    assert "Resolver:" in output
+    assert "cli" in output
+    assert "RESOLVER COMPARISON" not in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_config_reports_inconsistent_a(mock_resolver_cls, tmp_path: Path, capsys) -> None:
+    path = tmp_path / "resolvers.json"
+    path.write_text(
+        json.dumps(
+            {
+                "resolvers": [
+                    {"name": "system", "nameservers": []},
+                    {"name": "lab", "nameservers": ["192.0.2.53"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    primary = _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)])
+    extra = _lookup(a=[DNSRecord("A", "example.com", "198.51.100.10", 60)])
+    mock_resolver_cls.return_value.lookup_core.side_effect = [primary, extra]
+
+    assert run(["example.com", "--config", str(path), "--record", "A"]) == 0
+    output = capsys.readouterr().out
+    assert "RESOLVER COMPARISON" in output
+    assert "INCONSISTENT" in output
+    assert "Potential DNS inconsistency" in output
+    assert "hijacking" in output.lower()
+    assert mock_resolver_cls.return_value.lookup_core.call_count == 2
+    assert mock_resolver_cls.call_args_list[0].kwargs["nameservers"] is None
+    assert mock_resolver_cls.call_args_list[1].kwargs["nameservers"] == ["192.0.2.53"]
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_extra_resolver_timeout_is_incomplete(
+    mock_resolver_cls, tmp_path: Path, capsys
+) -> None:
+    path = tmp_path / "resolvers.json"
+    path.write_text(
+        json.dumps(
+            {
+                "resolvers": [
+                    {"name": "system", "nameservers": []},
+                    {"name": "lab", "nameservers": ["192.0.2.53"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    primary = _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)])
+    mock_resolver_cls.return_value.lookup_core.side_effect = [primary, DNSTimeoutError()]
+
+    assert run(["example.com", "--config", str(path), "--record", "A"]) == 0
+    output = capsys.readouterr().out
+    assert "INCOMPLETE" in output
+    assert "DNS query timed out" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_json_includes_resolver_comparison(
+    mock_resolver_cls, tmp_path: Path, capsys
+) -> None:
+    path = tmp_path / "resolvers.json"
+    path.write_text(
+        json.dumps(
+            {
+                "resolvers": [
+                    {"name": "system", "nameservers": []},
+                    {"name": "lab", "nameservers": ["192.0.2.53"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    lookup = _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)])
+    mock_resolver_cls.return_value.lookup_core.side_effect = [lookup, lookup]
+
+    assert run(["example.com", "--config", str(path), "--record", "A", "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["resolver_comparison"]["status"] == "CONSISTENT"
+    assert data["resolver_comparison"]["primary"] == "system"
+    assert data["resolver_comparison"]["resolvers"][1]["name"] == "lab"
