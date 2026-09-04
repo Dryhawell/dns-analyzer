@@ -1,6 +1,6 @@
 """CLI interface.
 
-Phase 20: optional multi-resolver comparison from a JSON config (no hardcoded IPs).
+Human output and flags. Resolver comparison is optional (--config / --nameserver).
 """
 
 from __future__ import annotations
@@ -805,7 +805,7 @@ def _run_reverse(
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer — Phase 20 (multi-resolver comparison)")
+    print("DNS Analyzer")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
