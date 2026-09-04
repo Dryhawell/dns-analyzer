@@ -50,6 +50,7 @@ from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
+from analyzer.version import __version__
 from utils.logger import configure_logging, get_logger
 from utils.reporter import (
     dumps_csv,
@@ -75,6 +76,7 @@ Examples:
   python main.py example.com --output reports/example_com.json
   python main.py example.com --config config/resolvers.example.json
   python main.py --reverse 8.8.8.8 --format csv
+  python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
 type plus DNSSEC, SPF, DMARC, findings, and the local risk score.
@@ -128,6 +130,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"dns-analyzer {__version__}",
     )
     parser.add_argument(
         "domain",
@@ -814,7 +821,7 @@ def _run_reverse(
 
 
 def _print_usage() -> None:
-    print("DNS Analyzer")
+    print(f"DNS Analyzer {__version__}")
     print()
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
@@ -823,6 +830,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --output reports/example.json")
     print("       python main.py <domain> --config config/resolvers.example.json")
     print("       python main.py --reverse <ip>")
+    print("       python main.py --version")
     print("Example: python main.py example.com")
     print("Example: python main.py --reverse 8.8.8.8")
     print()

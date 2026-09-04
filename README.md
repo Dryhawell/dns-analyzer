@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** Phase 22 — code review fixes (timeout budget, dangling CNAME, documentation IPs).
+> **Current status:** **v1.0.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -150,6 +150,7 @@ python main.py example.com --format csv --output reports/example_com.csv
 python main.py example.com --config config/resolvers.example.json
 python main.py example.com --nameserver 192.0.2.53
 python main.py --reverse 8.8.8.8 --format json
+python main.py --version
 ```
 
 | Mode | What you get |
@@ -164,6 +165,7 @@ python main.py --reverse 8.8.8.8 --format json
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
+| `--version` | Print `dns-analyzer 1.0.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -247,7 +249,7 @@ Reports are for other programs, not for humans scraping the terminal.
 - **`--output file.json`** — write the file; default text mode still prints the human report.
 - **CSV** — one row per record (`record_type,name,value,ttl,priority`). Findings and the risk score are JSON-only.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
+JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, including extra resolvers when comparison is on, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
@@ -361,9 +363,11 @@ No CAA record is common. CAs may look at parent names. Absence is a **low-weight
 ```
 dns-analyzer/
 ├── main.py                      # thin entry: sys.exit(run())
+├── CHANGELOG.md
 ├── requirements.txt
 ├── config/resolvers.example.json
 ├── analyzer/                    # DNS + security logic (no printing)
+│   ├── version.py               # __version__
 │   ├── validator.py             # URL / domain normalization
 │   ├── resolver.py              # dnspython wrapper, lookup_core
 │   ├── records.py               # rdata → DNSRecord
@@ -420,9 +424,9 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-Shipped through Phase 21 (records, security signals, CLI, export, logging, tests, errors, performance, optional multi-resolver, documentation).
+**v1.0.0** is the first stable CLI. History: [CHANGELOG.md](CHANGELOG.md).
 
-Next: **Phase 23 — v1.0.0**.
+Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, HTML/PDF reports. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 
 ---
 

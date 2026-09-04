@@ -437,6 +437,7 @@ def test_cli_help_lists_modes() -> None:
     assert "--config" in help_text
     assert "--nameserver" in help_text
     assert "--resolver" in help_text
+    assert "--version" in help_text
     assert "not a vulnerability scanner" in help_text.lower()
 
 
@@ -444,6 +445,13 @@ def test_cli_help_exit_zero() -> None:
     with pytest.raises(SystemExit) as caught:
         run(["--help"])
     assert caught.value.code == 0
+
+
+def test_cli_version_exits_zero(capsys) -> None:
+    with pytest.raises(SystemExit) as caught:
+        run(["--version"])
+    assert caught.value.code == 0
+    assert "1.0.0" in capsys.readouterr().out
 
 
 @patch("cli.interface.DNSResolver")

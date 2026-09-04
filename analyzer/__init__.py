@@ -19,8 +19,10 @@ from analyzer.risk import RiskScore, score_risk
 from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.validator import DomainValidationError, is_valid_domain, normalize_domain
+from analyzer.version import __version__
 
 __all__ = [
+    "__version__",
     "DnssecObservation",
     "CoreLookup",
     "DNSQueryError",

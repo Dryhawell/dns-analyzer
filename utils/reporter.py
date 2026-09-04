@@ -19,6 +19,7 @@ from analyzer.result import DNSAnalysisResult
 from analyzer.risk import RiskScore
 from analyzer.security import SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation
+from analyzer.version import __version__
 
 SCHEMA = "dns-analyzer.report.v1"
 
@@ -37,6 +38,7 @@ def record_to_dict(record: DNSRecord) -> dict[str, object]:
 def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
     payload: dict[str, object] = {
         "schema": SCHEMA,
+        "tool_version": __version__,
         "target": result.target,
         "mode": result.mode,
         "scan_time": result.scan_time,

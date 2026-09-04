@@ -40,6 +40,7 @@ def _result(**overrides) -> DNSAnalysisResult:
 def test_json_contains_required_keys() -> None:
     payload = result_to_dict(_result())
     assert payload["schema"] == SCHEMA
+    assert payload["tool_version"] == "1.0.0"
     assert payload["target"] == "example.com"
     assert payload["mode"] == "forward"
     assert payload["scan_time"] == "2026-09-03T11:00:00+00:00"
