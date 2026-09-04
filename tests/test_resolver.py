@@ -207,6 +207,24 @@ def test_lookup_core_a_nxdomain_does_not_query_later_types(resolver: DNSResolver
     resolver._client.resolve.assert_called_once_with("missing.example", "A", search=False)
 
 
+def test_lookup_core_later_nxdomain_is_not_existence_error(resolver: DNSResolver) -> None:
+    _dispatch(
+        resolver,
+        _core_answers(
+            A=_answer(DummyRdata("93.184.216.34")),
+            MX=dns.resolver.NXDOMAIN(),
+        ),
+    )
+
+    lookup = resolver.lookup_core("example.com", types=("MX",))
+
+    assert lookup.a[0].value == "93.184.216.34"
+    assert lookup.mx == ()
+    assert lookup.errors[0][0] == "MX"
+    assert "NXDOMAIN" in lookup.errors[0][1]
+    assert "does not exist" not in lookup.errors[0][1]
+
+
 def test_resolve_mx_includes_preference(resolver: DNSResolver) -> None:
     rdata = DummyRdata("10 mail.example.com.", preference=10, exchange="mail.example.com.")
     resolver._client.resolve.return_value = _answer(rdata)
@@ -295,6 +313,12 @@ def test_custom_nameservers_are_applied() -> None:
     assert resolver._client.nameservers == ["1.1.1.1"]
     assert resolver._client.timeout == 1.5
     assert resolver._client.lifetime == 1.5
+
+
+def test_lifetime_allows_nameserver_failover() -> None:
+    resolver = DNSResolver(timeout=2.0, nameservers=["192.0.2.1", "192.0.2.2"])
+    assert resolver._client.timeout == 2.0
+    assert resolver._client.lifetime == 4.0
 
 
 def test_edns_client_reuses_nameservers_without_os_config() -> None:

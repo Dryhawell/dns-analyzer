@@ -227,6 +227,11 @@ def test_cli_positional_ip_hints_reverse(capsys) -> None:
     assert "--reverse" in capsys.readouterr().err
 
 
+def test_cli_url_ip_hints_reverse(capsys) -> None:
+    assert run(["http://127.0.0.1/"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
 @patch("cli.interface.DNSResolver")
 def test_cli_prints_dnssec_detected(mock_resolver_cls, capsys) -> None:
     _bind(

@@ -64,8 +64,10 @@ def test_error_message_for_empty_input() -> None:
 
 
 def test_error_message_for_ip() -> None:
-    with pytest.raises(DomainValidationError, match="IP address"):
+    with pytest.raises(DomainValidationError, match="--reverse"):
         normalize_domain("1.1.1.1")
+    with pytest.raises(DomainValidationError, match="--reverse"):
+        normalize_domain("http://127.0.0.1/")
 
 
 def test_error_message_for_garbage() -> None:

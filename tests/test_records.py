@@ -29,7 +29,7 @@ def test_aaaa_compresses_ipv6() -> None:
 
 def test_describe_ip_scope_global_is_silent() -> None:
     assert describe_ip_scope("93.184.216.34") is None
-    assert describe_ip_scope("2001:db8::1") == "private"
+    assert describe_ip_scope("2001:db8::1") == "documentation"
 
 
 def test_describe_ip_scope_loopback_and_private() -> None:
@@ -82,6 +82,7 @@ def test_describe_ip_scope_other_non_global() -> None:
     assert describe_ip_scope("169.254.1.1") == "link-local"
     assert describe_ip_scope("0.0.0.0") == "unspecified"
     assert describe_ip_scope("224.0.0.1") == "multicast"
+    assert describe_ip_scope("192.0.2.1") == "documentation"
     assert describe_ip_scope("not-an-ip") == "invalid"
 
 

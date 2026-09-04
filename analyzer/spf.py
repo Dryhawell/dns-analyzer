@@ -67,6 +67,11 @@ def inspect_spf(
         )
 
     all_term, all_meaning = _trailing_all(policies[0])
+    for policy in policies[1:]:
+        term, meaning = _trailing_all(policy)
+        if term in {"+all", "all"}:
+            all_term, all_meaning = term, meaning
+            break
     return SpfObservation(
         status="FOUND",
         policies=policies,

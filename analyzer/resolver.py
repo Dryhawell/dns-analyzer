@@ -67,11 +67,9 @@ class DNSResolver:
     ) -> None:
         self.timeout = timeout
         self._client = dns.resolver.Resolver(configure=True)
-        # timeout = wait per nameserver; lifetime = budget for the whole query
-        self._client.timeout = timeout
-        self._client.lifetime = timeout
         if nameservers:
             self._client.nameservers = list(nameservers)
+        self._apply_timeouts()
         self._lock = Lock()
         self.parallel = True
 
@@ -147,7 +145,7 @@ class DNSResolver:
         except DomainNotFoundError:
             if fatal:
                 raise
-            return (), (label, "Domain does not exist.")
+            return (), (label, f"NXDOMAIN for {label} (name exists for other types).")
         except DNSQueryError as exc:
             if fatal:
                 raise
@@ -262,10 +260,16 @@ class DNSResolver:
             client.nameservers = nameservers
         else:
             client = dns.resolver.Resolver(configure=True)
-        client.timeout = self.timeout
-        client.lifetime = self.timeout
+        client.timeout = self._client.timeout
+        client.lifetime = self._client.lifetime
         client.use_edns(0, dns.flags.DO, 1232)
         return client
+
+    def _apply_timeouts(self) -> None:
+        """timeout = wait per nameserver; lifetime = budget for failover."""
+        self._client.timeout = self.timeout
+        count = max(1, len(self._client.nameservers))
+        self._client.lifetime = self.timeout * min(count, 4)
 
     def _query(self, name: str, record_type: str) -> list[DNSRecord]:
         """Ask the recursive resolver for one record type.

@@ -98,3 +98,9 @@ def test_multiple_dmarc_records() -> None:
     assert observation.status == "FOUND"
     assert observation.multiple_records is True
     assert observation.policy == "none"
+
+
+def test_dmarc_requires_semicolon_after_version() -> None:
+    observation = evaluate_dmarc("_dmarc.example.com", _txt("v=DMARC1 p=reject"))
+    assert observation.status == "NOT DETECTED"
+    assert observation.policy is None

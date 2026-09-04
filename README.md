@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** Phase 21 — documentation.
+> **Current status:** Phase 22 — code review fixes (timeout budget, dangling CNAME, documentation IPs).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -165,7 +165,7 @@ python main.py --reverse 8.8.8.8 --format json
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
 
-`--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5.
+`--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -177,7 +177,7 @@ The program does not print a traceback for expected DNS or CLI errors. Unexpecte
 
 Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
 
-`--record A` **queries only A**. JSON/CSV contain collected records, not hidden extras.
+`--record A` **queries only A**. `--record MX` still queries **A first** (existence); JSON/CSV therefore include that A plus MX — collected data, not a hidden full-zone dump.
 
 ### Multiple resolvers
 
@@ -404,6 +404,7 @@ If a test needs the network, it does not belong in this suite.
 - Absence of DNSSEC / SPF / DMARC / CAA is a signal, not automatic critical risk
 - DNSSEC here is **visibility to this resolver**, not validation to the IANA root
 - SPF `include:` chains are not followed; DKIM selectors are not discovered
+- Documentation addresses (`192.0.2.0/24`, `2001:db8::/32`, …) are labeled, not scored as private LAN
 - The risk score is a local heuristic, not a security standard
 - Different answers from two resolvers are not proof of hijacking
 - Results must be interpreted in context
@@ -421,7 +422,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 Shipped through Phase 21 (records, security signals, CLI, export, logging, tests, errors, performance, optional multi-resolver, documentation).
 
-Next: **Phase 22 — code review**, then **Phase 23 — v1.0.0**.
+Next: **Phase 23 — v1.0.0**.
 
 ---
 

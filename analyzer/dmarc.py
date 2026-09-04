@@ -94,10 +94,7 @@ def evaluate_dmarc(
 
 
 def _is_dmarc(value: str) -> bool:
-    stripped = value.strip()
-    if _DMARC_PREFIX.match(stripped):
-        return True
-    return stripped.lower().startswith("v=dmarc1")
+    return bool(_DMARC_PREFIX.match(value.strip()))
 
 
 def _parse_tags(record: str) -> dict[str, str]:

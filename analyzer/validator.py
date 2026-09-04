@@ -53,7 +53,7 @@ def normalize_domain(raw: str | None) -> str:
         empty / whitespace-only input
         random characters
         bare TLDs or single labels (example)
-        IP addresses (those belong to reverse DNS, later)
+        IP addresses (those belong to --reverse)
     """
     if raw is None:
         raise DomainValidationError("Domain cannot be empty.")
@@ -73,7 +73,7 @@ def normalize_domain(raw: str | None) -> str:
 
     if _is_ip_address(hostname):
         raise DomainValidationError(
-            "Input looks like an IP address. Reverse DNS will be added in a later phase."
+            "Input looks like an IP address. Use --reverse <ip>."
         )
 
     _assert_allowed_characters(hostname)

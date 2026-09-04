@@ -111,6 +111,14 @@ def _ensure_utf8_stdout() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
 
 
+def _configure_logging() -> None:
+    """File log is best-effort. Analysis still runs if the log cannot be created."""
+    try:
+        configure_logging()
+    except OSError as exc:
+        print(f"Warning: Could not write log file ({exc}).", file=sys.stderr)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dns-analyzer",
@@ -554,7 +562,8 @@ def _print_lookup(
             _print_caa_section(lookup.caa, errors)
         _print_ttl_summary(_selected_records(lookup, types))
     if view.show_security:
-        assert dnssec is not None and spf is not None and dmarc is not None and security is not None
+        if dnssec is None or spf is None or dmarc is None or security is None:
+            raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC results.")
         _print_dnssec(dnssec)
         _print_spf(spf)
         _print_dmarc(dmarc)
@@ -757,7 +766,7 @@ def _run_reverse(
     export: ExportPlan,
     nameservers: list[str] | None = None,
 ) -> int:
-    configure_logging()
+    _configure_logging()
     try:
         addr = parse_ip(ip_raw)
     except InvalidIPError as exc:
@@ -831,7 +840,7 @@ def run(argv: list[str] | None = None) -> int:
         return 1
     except Exception:
         try:
-            configure_logging()
+            _configure_logging()
             _log.exception("Unexpected error")
         except OSError:
             pass
@@ -852,21 +861,21 @@ def _run(argv: list[str] | None = None) -> int:
 
     view = resolve_report_view(args)
     if isinstance(view, str):
-        configure_logging()
+        _configure_logging()
         _log.error("Invalid CLI options")
         print(f"Error: {view}", file=sys.stderr)
         return 1
 
     export = plan_export(args.export_format, args.output)
     if isinstance(export, str):
-        configure_logging()
+        _configure_logging()
         _log.error("Invalid CLI options")
         print(f"Error: {export}", file=sys.stderr)
         return 1
 
     settings = settings_from_args(args)
     if isinstance(settings, str):
-        configure_logging()
+        _configure_logging()
         _log.error("Invalid CLI options")
         print(f"Error: {settings}", file=sys.stderr)
         return 1
@@ -902,7 +911,7 @@ def _run(argv: list[str] | None = None) -> int:
         return 0
 
     if looks_like_ip(args.domain):
-        configure_logging()
+        _configure_logging()
         _log.error("Positional argument looks like an IP address")
         print(
             "Error: That looks like an IP address. Use --reverse "
@@ -914,12 +923,12 @@ def _run(argv: list[str] | None = None) -> int:
     try:
         domain = normalize_domain(args.domain)
     except DomainValidationError as exc:
-        configure_logging()
+        _configure_logging()
         _log.error("Invalid domain")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    configure_logging()
+    _configure_logging()
     _log.info(
         "DNS analysis started target=%s mode=forward resolver=%s",
         domain,

@@ -245,6 +245,41 @@ def test_cname_without_address_is_low() -> None:
     assert "takeover" in dangling.description.lower()
 
 
+def test_cname_not_dangling_when_aaaa_timed_out() -> None:
+    lookup = _lookup(
+        cname=[DNSRecord("CNAME", "www.example.com", "target.example.net", 300)],
+        txt=[DNSRecord("TXT", "www.example.com", "v=spf1 -all", 300)],
+        caa=[DNSRecord("CAA", "www.example.com", '0 issue "letsencrypt.org"', 3600)],
+        errors=(("AAAA", "DNS query timed out."),),
+    )
+    report = SecurityAnalyzer().analyze(
+        lookup,
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(lookup.txt),
+        evaluate_dmarc("_dmarc.www.example.com", [
+            DNSRecord("TXT", "_dmarc.www.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+    )
+    assert all("CNAME" not in item.title for item in report.findings)
+
+
+def test_documentation_address_is_not_scored_as_private() -> None:
+    lookup = _lookup(
+        a=[DNSRecord("A", "example.com", "192.0.2.1", 300)],
+        txt=[DNSRecord("TXT", "example.com", "v=spf1 -all", 300)],
+        caa=[DNSRecord("CAA", "example.com", '0 issue "letsencrypt.org"', 3600)],
+    )
+    report = SecurityAnalyzer().analyze(
+        lookup,
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(lookup.txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+    )
+    assert all(item.code != "address_non_global" for item in report.findings)
+
+
 def test_missing_caa_is_info() -> None:
     lookup = _lookup(
         a=[DNSRecord("A", "example.com", "93.184.216.34", 300)],

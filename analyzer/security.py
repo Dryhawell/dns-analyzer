@@ -268,6 +268,8 @@ class SecurityAnalyzer:
     def _cname(self, lookup: CoreLookup) -> list[SecurityFinding]:
         if not lookup.cname:
             return []
+        if any(label in {"A", "AAAA"} for label, _ in lookup.errors):
+            return []
         if lookup.a or lookup.aaaa:
             return []
         return [

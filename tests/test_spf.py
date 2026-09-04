@@ -44,6 +44,7 @@ def test_multiple_spf_records() -> None:
     observation = inspect_spf(_txt("v=spf1 -all", "v=spf1 +all"))
     assert observation.status == "FOUND"
     assert observation.multiple_records is True
+    assert observation.all_term == "+all"
 
 
 def test_spf_plus_all_and_bare_all() -> None:

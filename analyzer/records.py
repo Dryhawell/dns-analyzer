@@ -11,8 +11,8 @@ def format_rdata(record_type: str, rdata: object) -> str:
     """Return a stable, human-readable value for one resource record.
 
     Type-specific fields (MX preference, SOA serial, CAA tags) are kept
-    because later phases will parse them. Trailing dots are stripped so
-    CLI output matches the normalized domain style.
+    on DNSRecord so the CLI and JSON can show them. Trailing dots are
+    stripped so CLI output matches the normalized domain style.
     """
     rtype = record_type.upper()
 
@@ -119,6 +119,8 @@ def describe_ip_scope(value: str) -> str | None:
     """Return a non-global scope label, or None for typical public unicast.
 
     Missing AAAA or a private address is an observation, not a verdict.
+    Documentation ranges (RFC 5737 / RFC 3849) are labeled separately so
+    they are not scored as RFC1918-style misconfiguration.
     """
     try:
         addr = ipaddress.ip_address(value)
@@ -133,11 +135,26 @@ def describe_ip_scope(value: str) -> str | None:
         return "unspecified"
     if addr.is_multicast:
         return "multicast"
+    if _is_documentation(addr):
+        return "documentation"
     if addr.is_private:
         return "private"
     if addr.is_reserved:
         return "reserved"
     return None
+
+
+def _is_documentation(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(addr, ipaddress.IPv4Address):
+        return any(
+            addr in network
+            for network in (
+                ipaddress.ip_network("192.0.2.0/24"),
+                ipaddress.ip_network("198.51.100.0/24"),
+                ipaddress.ip_network("203.0.113.0/24"),
+            )
+        )
+    return addr in ipaddress.ip_network("2001:db8::/32")
 
 
 def _text(value: object) -> str:
