@@ -63,7 +63,7 @@ from utils.reporter import (
 
 _DEFAULT_TIMEOUT = 5.0
 _MAX_TIMEOUT = 120.0
-_RECORD_ORDER = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
+_RECORD_ORDER = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA", "HTTPS", "SVCB")
 _RECORD_TYPES = frozenset(_RECORD_ORDER)
 _SECURITY_QUERY_TYPES = ("A", "AAAA", "CNAME", "TXT", "CAA")
 _log = get_logger("cli")
@@ -152,7 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="records",
         metavar="TYPE",
         help=(
-            "Show only this record type (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA). "
+            "Show only this record type (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB). "
             "Repeatable. Other types are not queried. A is always queried first "
             "so NXDOMAIN can abort. PTR is --reverse, not --record PTR."
         ),
@@ -274,7 +274,7 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
 def types_to_query(view: ReportView) -> tuple[str, ...] | None:
     """Which core types to send. None means every CORE type (default / --all).
 
-    --record MX still queries A first (existence). --security skips MX/NS/SOA.
+    --record MX still queries A first (existence). --security skips MX/NS/SOA/HTTPS/SVCB.
     """
     if view.record_types is None:
         return None
@@ -396,6 +396,8 @@ def _selected_records(lookup: CoreLookup, types: frozenset[str] | None) -> tuple
         "TXT": lookup.txt,
         "SOA": lookup.soa,
         "CAA": lookup.caa,
+        "HTTPS": lookup.https,
+        "SVCB": lookup.svcb,
     }
     records: list[DNSRecord] = []
     for label in _RECORD_ORDER:
@@ -528,6 +530,28 @@ def _print_caa_section(
         print()
 
 
+def _print_svcb_section(
+    title: str,
+    empty_message: str,
+    section: str,
+    records: tuple[DNSRecord, ...],
+    errors: tuple[tuple[str, str], ...],
+) -> None:
+    print(title)
+    if not records:
+        _print_missing(empty_message, section, errors)
+        return
+
+    for record in records:
+        print(record.value)
+        if record.priority is not None:
+            print(f"Priority: {record.priority}")
+        for label, value in record.details:
+            print(f"{label}: {value}")
+        print(format_ttl_line(record.ttl))
+        print()
+
+
 def _print_ttl_summary(records: tuple[DNSRecord, ...]) -> None:
     print("TTL SUMMARY")
     print("────────────────────────")
@@ -586,6 +610,22 @@ def _print_lookup(
             _print_soa_section(lookup.soa, errors)
         if "CAA" in wanted:
             _print_caa_section(lookup.caa, errors)
+        if "HTTPS" in wanted:
+            _print_svcb_section(
+                "HTTPS RECORDS",
+                "No HTTPS record found.",
+                "HTTPS",
+                lookup.https,
+                errors,
+            )
+        if "SVCB" in wanted:
+            _print_svcb_section(
+                "SVCB RECORDS",
+                "No SVCB record found.",
+                "SVCB",
+                lookup.svcb,
+                errors,
+            )
         _print_ttl_summary(_selected_records(lookup, types))
     if dkim:
         for item in dkim:

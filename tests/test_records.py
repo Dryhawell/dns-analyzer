@@ -104,3 +104,48 @@ def test_soa_details_include_mailbox_and_timers() -> None:
     assert details["Mailbox"] == "hostmaster.example.com"
     assert details["Serial"] == "2026090201"
     assert details["Refresh"] == "7200"
+
+
+def test_https_service_mode_summarizes_params() -> None:
+    class _Param:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def to_text(self) -> str:
+            return self._text
+
+    rdata = DummyRdata(
+        "unused",
+        priority=1,
+        target=".",
+        params={"alpn": _Param("h2,h3"), "port": _Param("443"), "ech": _Param("QUFB")},
+    )
+    assert format_rdata("HTTPS", rdata) == "1 . alpn=h2,h3 port=443 ech=(present)"
+    row = records_from_answer("HTTPS", "example.com", SimpleAnswer(rdata, ttl=60))[0]
+    assert row.priority == 1
+    details = dict(row.details)
+    assert "ServiceMode" in details["Mode"]
+    assert "h2,h3" in details["ALPN"]
+    assert details["Port"] == "443"
+    assert "present" in details["ECH"]
+    assert "QUFB" not in row.value
+    assert "QUFB" not in details["ECH"]
+
+
+def test_https_alias_mode() -> None:
+    rdata = DummyRdata("unused", priority=0, target="svc.example.net.")
+    assert format_rdata("HTTPS", rdata) == "0 svc.example.net"
+    row = records_from_answer("SVCB", "example.com", SimpleAnswer(rdata))[0]
+    assert "AliasMode" in dict(row.details)["Mode"]
+    assert row.record_type == "SVCB"
+
+
+def test_https_from_dnspython_rdata() -> None:
+    import dns.rdata
+
+    rdata = dns.rdata.from_text("IN", "HTTPS", "1 . alpn=h2,h3 port=443")
+    text = format_rdata("HTTPS", rdata)
+    assert text.startswith("1 .")
+    assert "alpn=" in text
+    assert "h2" in text
+    assert "port=443" in text

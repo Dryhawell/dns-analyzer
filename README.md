@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.2.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.3.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -13,7 +13,7 @@ This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CA
 DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 
 1. Validates and normalizes the input
-2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, PTR)
+2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB, PTR)
 3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, optional DKIM)
 4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
@@ -54,6 +54,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - DNSSEC **detection** (DNSKEY / DS / AD flag), not a full chain-of-trust validator
 - SPF and DMARC parsing from TXT; DKIM is explained, not auto-discovered
 - CAA inspection
+- HTTPS / SVCB (RFC 9460) — ALPN, port, ECH presence; not an HTTP scanner
 - Reverse DNS (`PTR`)
 - Security findings with severity, description, recommendation, and a stable `code`
 - Transparent risk score (local heuristic, 0–100; not CVSS)
@@ -94,6 +95,8 @@ It does **not** assign CVEs, does **not** prove a domain is compromised, and doe
 | **TXT** | Free-form text (SPF, verification tokens, policies) | No published text records at this name |
 | **SOA** | Start of authority: primary NS, serial, timers | Common on subdomains; SOA lives at the zone apex |
 | **CAA** | Which certificate authorities may issue TLS certs | CAs may fall back to parent names; not automatically unsafe |
+| **HTTPS** | Service parameters for this name (ALPN, port, ECH) — DNS type 65, RFC 9460 | Common; browsers then use A/AAAA. Not a missing website |
+| **SVCB** | Generic service binding (same wire format as HTTPS) | Common; not a vulnerability |
 | **PTR** | IP → hostname (reverse DNS, under in-addr.arpa / ip6.arpa) | The address has no published reverse name |
 
 TTL is shown next to each record as a **cache lifetime**, never as a security score. MX **priority**: lower number is tried first.
@@ -142,6 +145,7 @@ python main.py example.com
 python main.py example.com --all
 python main.py example.com --record A
 python main.py example.com --record MX --record NS
+python main.py example.com --record HTTPS
 python main.py example.com --security
 python main.py example.com --dkim google
 python main.py https://example.com/login
@@ -160,7 +164,7 @@ python main.py --version
 | --- | --- |
 | (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, findings, risk score |
 | `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
-| `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA) |
+| `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB) |
 | `--dkim SELECTOR` | TXT at `SELECTOR._domainkey.<domain>`. Repeatable (max 8). Never guessed |
 | `--record A --security` | That type plus the security sections |
 | `--reverse IP` | PTR only |
@@ -169,7 +173,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.2.0` and exit |
+| `--version` | Print `dns-analyzer 1.3.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -181,7 +185,7 @@ python main.py --version
 
 The program does not print a traceback for expected DNS or CLI errors. Unexpected failures log a traceback to the log file and print one line on stderr.
 
-Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, and **CAA**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
+Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, **CAA**, **HTTPS**, and **SVCB**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
 
 `--record A` **queries only A**. `--record MX` still queries **A first** (existence); JSON/CSV therefore include that A plus MX — collected data, not a hidden full-zone dump.
 
@@ -207,6 +211,12 @@ One record type (no security sections, no extra type queries except A for existe
 
 ```bash
 python main.py example.com --record MX
+```
+
+HTTPS service binding (DNS type 65, not an HTTP request):
+
+```bash
+python main.py example.com --record HTTPS
 ```
 
 Security sections only:
@@ -373,6 +383,8 @@ Missing DMARC is an observation, not an automatic critical vulnerability. Multip
 
 No CAA record is common. CAs may look at parent names. Absence is a **low-weight** observation here, not “the domain is hijacked”. This tool does not talk to CAs or check CT logs.
 
+**HTTPS** and **SVCB** (RFC 9460) are separate DNS types. They tell a client which protocols, ports, or Encrypted Client Hello (ECH) config this name advertises. A missing HTTPS record is not “the site is down”. This tool does not fetch web pages.
+
 ---
 
 ## Reverse DNS
@@ -431,6 +443,7 @@ If a test needs the network, it does not belong in this suite.
 
 - Not a vulnerability scanner
 - Absence of DNSSEC / SPF / DMARC / CAA is a signal, not automatic critical risk
+- Missing HTTPS/SVCB is common and is not scored
 - DNSSEC here is **visibility to this resolver**, not validation to the IANA root
 - SPF `include:` chains are not followed
 - DKIM selectors are **opt-in** (`--dkim`); they are never brute-forced or guessed
@@ -450,7 +463,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.2.0** adds opt-in DKIM selector lookup. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.3.0** adds HTTPS/SVCB records. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

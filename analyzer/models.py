@@ -23,7 +23,7 @@ class DNSRecord:
 
 @dataclass(frozen=True)
 class CoreLookup:
-    """A, AAAA, CNAME, MX, NS, TXT, SOA and CAA for one name."""
+    """A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS and SVCB for one name."""
 
     a: tuple[DNSRecord, ...]
     aaaa: tuple[DNSRecord, ...]
@@ -34,6 +34,8 @@ class CoreLookup:
     soa: tuple[DNSRecord, ...]
     caa: tuple[DNSRecord, ...]
     errors: tuple[tuple[str, str], ...] = ()
+    https: tuple[DNSRecord, ...] = ()
+    svcb: tuple[DNSRecord, ...] = ()
 
     def all_records(self) -> tuple[DNSRecord, ...]:
         return (
@@ -45,4 +47,6 @@ class CoreLookup:
             + self.txt
             + self.soa
             + self.caa
+            + self.https
+            + self.svcb
         )

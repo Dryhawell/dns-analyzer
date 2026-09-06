@@ -23,6 +23,8 @@ def _lookup(
     txt: list[DNSRecord] | None = None,
     soa: list[DNSRecord] | None = None,
     caa: list[DNSRecord] | None = None,
+    https: list[DNSRecord] | None = None,
+    svcb: list[DNSRecord] | None = None,
     errors: tuple[tuple[str, str], ...] = (),
 ) -> CoreLookup:
     return CoreLookup(
@@ -34,6 +36,8 @@ def _lookup(
         txt=tuple(txt or []),
         soa=tuple(soa or []),
         caa=tuple(caa or []),
+        https=tuple(https or []),
+        svcb=tuple(svcb or []),
         errors=errors,
     )
 
@@ -183,6 +187,45 @@ def test_cli_prints_txt_soa_caa(mock_resolver_cls, capsys) -> None:
     assert "SPF" in output
     assert "Status: FOUND" in output
     assert "v=spf1 -all" in output
+    assert "HTTPS RECORDS" in output
+    assert "No HTTPS record found." in output
+    assert "SVCB RECORDS" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_record_https_skips_security(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+            https=[
+                DNSRecord(
+                    "HTTPS",
+                    "example.com",
+                    "1 . alpn=h2,h3 ech=(present)",
+                    60,
+                    priority=1,
+                    details=(
+                        ("Mode", "ServiceMode — this name advertises protocol parameters (RFC 9460)"),
+                        ("ALPN", "h2,h3 — application protocols (e.g. HTTP/2, HTTP/3)"),
+                        ("ECH", "present — Encrypted Client Hello config in DNS, not a private key"),
+                    ),
+                )
+            ],
+        ),
+    )
+
+    assert run(["example.com", "--record", "HTTPS"]) == 0
+    output = capsys.readouterr().out
+    assert "HTTPS RECORDS" in output
+    assert "alpn=h2,h3" in output
+    assert "ServiceMode" in output
+    assert "ech=(present)" in output
+    assert "SECURITY ANALYSIS" not in output
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
+        "example.com", types=("A", "HTTPS")
+    )
 
 
 @patch("cli.interface.DNSResolver")
@@ -748,9 +791,11 @@ def test_types_to_query_record_a_only() -> None:
     assert types_to_query(view) == ("A",)
 
 
-def test_types_to_query_security_skips_mx_ns_soa() -> None:
+def test_types_to_query_security_skips_mx_ns_soa_https() -> None:
     view = ReportView(record_types=frozenset(), show_security=True)
     assert types_to_query(view) == ("A", "AAAA", "CNAME", "TXT", "CAA")
+    assert "HTTPS" not in types_to_query(view)
+    assert "SVCB" not in types_to_query(view)
 
 
 def test_types_to_query_record_plus_security() -> None:

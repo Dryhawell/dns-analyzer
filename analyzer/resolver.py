@@ -37,7 +37,7 @@ from analyzer.reverse import ptr_name
 from utils.logger import get_logger
 
 _DEFAULT_TIMEOUT = 5.0
-CORE_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA")
+CORE_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA", "HTTPS", "SVCB")
 _log = get_logger("resolver")
 
 
@@ -131,6 +131,8 @@ class DNSResolver:
             txt=buckets["TXT"],
             soa=buckets["SOA"],
             caa=buckets["CAA"],
+            https=buckets["HTTPS"],
+            svcb=buckets["SVCB"],
             errors=tuple(errors),
         )
 
@@ -162,6 +164,8 @@ class DNSResolver:
             "TXT": self.resolve_txt,
             "SOA": self.resolve_soa,
             "CAA": self.resolve_caa,
+            "HTTPS": self.resolve_https,
+            "SVCB": self.resolve_svcb,
         }
         return methods[label](name)
 
@@ -182,6 +186,12 @@ class DNSResolver:
 
     def resolve_caa(self, name: str) -> list[DNSRecord]:
         return self._query(name, "CAA")
+
+    def resolve_https(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "HTTPS")
+
+    def resolve_svcb(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "SVCB")
 
     def resolve_ptr(self, name: str) -> list[DNSRecord]:
         """Query a PTR name such as 4.4.8.8.in-addr.arpa."""

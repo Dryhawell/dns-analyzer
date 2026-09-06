@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.3.0 — 2026-09-06
+
+HTTPS and SVCB records (RFC 9460). These are DNS types, not an HTTP scan.
+
+### Added
+
+- Forward lookup for **HTTPS** (type 65) and **SVCB** (type 64)
+- AliasMode vs ServiceMode, ALPN, port, address hints; ECH is reported as present (config not dumped)
+- `--record HTTPS` / `--record SVCB`; default `--all` includes them
+- Missing HTTPS/SVCB is not scored and is not a finding
+
+### Notes
+
+- HTTPS in DNS is not “the website”. Browsers use it for HTTP/3 / ECH hints
+- `--security` still skips these types (they are not SPF/DMARC/CAA)
+
 ## 1.2.0 — 2026-09-06
 
 Opt-in DKIM selector lookup. Selectors are never guessed.

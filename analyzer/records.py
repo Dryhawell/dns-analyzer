@@ -46,6 +46,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
             value = value.decode("utf-8", errors="replace")
         return f'{flags} {tag} "{value}"'
 
+    if rtype in {"HTTPS", "SVCB"}:
+        return _format_svcb(rdata)
+
     if rtype in {"A", "AAAA"}:
         return canonicalize_ip(_text(rdata))
 
@@ -95,16 +98,106 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         if meaning:
             return (("Tag", f"{tag} — {meaning}"),)
         return ()
+    if rtype in {"HTTPS", "SVCB"}:
+        return _svcb_details(rdata)
     return ()
 
 
 def _mx_priority(record_type: str, rdata: object) -> int | None:
-    if record_type.upper() != "MX":
-        return None
-    preference = getattr(rdata, "preference", None)
-    if preference is None:
-        return None
-    return int(preference)
+    rtype = record_type.upper()
+    if rtype == "MX":
+        preference = getattr(rdata, "preference", None)
+        if preference is None:
+            return None
+        return int(preference)
+    if rtype in {"HTTPS", "SVCB"}:
+        priority = getattr(rdata, "priority", None)
+        if priority is None:
+            return None
+        return int(priority)
+    return None
+
+
+def _format_svcb(rdata: object) -> str:
+    """Stable HTTPS/SVCB summary. ECH config is marked present, not dumped."""
+    priority = getattr(rdata, "priority", "")
+    target = _text(getattr(rdata, "target", "")) or "."
+    extras: list[str] = []
+    for key, value in _svcb_params(rdata):
+        if key == "ech":
+            extras.append("ech=(present)")
+            continue
+        extras.append(f"{key}={value}")
+    if extras:
+        return f"{priority} {target} " + " ".join(extras)
+    return f"{priority} {target}".strip()
+
+
+def _svcb_details(rdata: object) -> tuple[tuple[str, str], ...]:
+    rows: list[tuple[str, str]] = []
+    priority = getattr(rdata, "priority", None)
+    if priority == 0:
+        rows.append(
+            (
+                "Mode",
+                "AliasMode — follow the target for HTTPS/SVCB parameters "
+                "(this is a DNS record, not an HTTP redirect)",
+            )
+        )
+    elif priority is not None:
+        rows.append(
+            (
+                "Mode",
+                "ServiceMode — this name advertises protocol parameters (RFC 9460)",
+            )
+        )
+    for key, value in _svcb_params(rdata):
+        if key == "ech":
+            rows.append(
+                (
+                    "ECH",
+                    "present — Encrypted Client Hello config in DNS, not a private key",
+                )
+            )
+            continue
+        if key == "alpn":
+            rows.append(("ALPN", f"{value} — application protocols (e.g. HTTP/2, HTTP/3)"))
+            continue
+        if key == "port":
+            rows.append(("Port", value))
+            continue
+        if key == "ipv4hint":
+            rows.append(("IPv4 hint", value))
+            continue
+        if key == "ipv6hint":
+            rows.append(("IPv6 hint", value))
+            continue
+        rows.append((key, value))
+    return tuple(rows)
+
+
+def _svcb_params(rdata: object) -> list[tuple[str, str]]:
+    raw = getattr(rdata, "params", None) or {}
+    items: list[tuple[str, str]] = []
+    if not hasattr(raw, "items"):
+        return items
+    for key, value in raw.items():
+        name = _svcb_key_name(key)
+        if name == "ech":
+            items.append((name, "present"))
+            continue
+        text = value.to_text() if hasattr(value, "to_text") else str(value)
+        items.append((name, text.strip('"')))
+    return items
+
+
+def _svcb_key_name(key: object) -> str:
+    try:
+        from dns.rdtypes.svcbbase import key_to_text
+
+        return str(key_to_text(key)).lower()
+    except Exception:
+        return str(key).lower()
 
 
 def canonicalize_ip(value: str) -> str:

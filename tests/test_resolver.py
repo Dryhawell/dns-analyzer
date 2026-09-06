@@ -139,6 +139,8 @@ def test_lookup_core_queries_cname_mx_ns(resolver: DNSResolver) -> None:
     assert lookup.txt[0].value == "v=spf1 -all"
     assert lookup.soa[0].details[0][1] == "ns1.example.com"
     assert lookup.caa[0].value == '0 issue "letsencrypt.org"'
+    assert lookup.https == ()
+    assert lookup.svcb == ()
     queried_types = [call.args[1] for call in resolver._client.resolve.call_args_list]
     assert queried_types[0] == "A"
     assert set(queried_types) == set(CORE_TYPES)
