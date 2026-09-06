@@ -52,6 +52,8 @@ def test_json_contains_required_keys() -> None:
     assert payload["records"][1]["priority"] == 10
     assert payload["errors"][0]["section"] == "CAA"
     assert payload["dnssec"] is None
+    assert payload["dmarc"] is None
+    assert payload["dkim"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -163,3 +165,21 @@ def test_write_report_rejects_unknown_format(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unsupported"):
         write_report(tmp_path / "x.bin", _result(), "pdf")
+
+
+def test_json_and_html_include_dkim() -> None:
+    from analyzer.dkim import evaluate_dkim
+
+    observation = evaluate_dkim(
+        "google._domainkey.example.com",
+        "google",
+        [DNSRecord("TXT", "google._domainkey.example.com", "v=DKIM1; p=MIIB", 300)],
+    )
+    result = _result(dkim=(observation,))
+    payload = result_to_dict(result)
+    assert payload["dkim"][0]["selector"] == "google"
+    assert payload["dkim"][0]["status"] == "FOUND"
+    assert payload["dkim"][0]["key_present"] is True
+    page = dumps_html(result)
+    assert "google._domainkey.example.com" in page
+    assert "FOUND" in page

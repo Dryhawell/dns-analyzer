@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.2.0 — 2026-09-06
+
+Opt-in DKIM selector lookup. Selectors are never guessed.
+
+### Added
+
+- `--dkim SELECTOR` (repeatable, max 8) queries `SELECTOR._domainkey.<domain>` TXT
+- Parse `v=DKIM1` (`k=`, `p=`); empty `p=` is **revoked**, not a missing domain
+- JSON/HTML `dkim` observations; CLI shows key type and length, not the raw key
+- Findings only for selectors you named (`dkim_selector_missing` is +0)
+
+### Notes
+
+- Default / `--all` / `--security` still do **not** hunt DKIM keys
+- Read the selector from a signed message (`s=` in `DKIM-Signature`), then pass `--dkim`
+
 ## 1.1.0 — 2026-09-06
 
 HTML reports for sharing a scan in a browser. JSON remains the machine schema.

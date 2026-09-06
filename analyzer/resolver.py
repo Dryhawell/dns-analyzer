@@ -20,6 +20,7 @@ import dns.flags
 import dns.resolver
 
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
+from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 
 from analyzer.exceptions import (
@@ -204,6 +205,17 @@ class DNSResolver:
         except DNSQueryError as exc:
             return evaluate_dmarc(qname, (), error=str(exc))
         return evaluate_dmarc(qname, records)
+
+    def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
+        """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""
+        qname = dkim_query_name(name, selector)
+        try:
+            records = self.resolve_txt(qname)
+        except DomainNotFoundError:
+            return evaluate_dkim(qname, selector, ())
+        except DNSQueryError as exc:
+            return evaluate_dkim(qname, selector, (), error=str(exc))
+        return evaluate_dkim(qname, selector, records)
 
     def inspect_dnssec(self, name: str) -> DnssecObservation:
         """Look for DNSKEY/DS and the AD flag. Failures become observations."""

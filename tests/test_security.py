@@ -329,3 +329,46 @@ def test_many_txt_records_are_info() -> None:
     )
     volume = next(item for item in report.findings if item.code == "txt_many")
     assert volume.severity == "info"
+
+
+def test_dkim_revoked_is_medium_not_high() -> None:
+    from analyzer.dkim import evaluate_dkim
+
+    observation = evaluate_dkim(
+        "google._domainkey.example.com",
+        "google",
+        [DNSRecord("TXT", "google._domainkey.example.com", "v=DKIM1; p=", 300)],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        (observation,),
+    )
+    revoked = next(item for item in report.findings if item.code == "dkim_revoked")
+    assert revoked.severity == "medium"
+    assert report.highest_severity == "medium"
+    assert not any(item.severity == "high" for item in report.findings)
+
+
+def test_dkim_missing_selector_is_info_and_unscored() -> None:
+    from analyzer.dkim import evaluate_dkim
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_dkim("google._domainkey.example.com", "google", ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        (observation,),
+    )
+    missing = next(item for item in report.findings if item.code == "dkim_selector_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["dkim_selector_missing"] == 0
+    assert report.risk.value == 0

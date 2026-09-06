@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
+from analyzer.dkim import DkimObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import DNSRecord
 from analyzer.security import SecurityReport
@@ -29,6 +30,7 @@ class DNSAnalysisResult:
     dnssec: DnssecObservation | None = None
     spf: SpfObservation | None = None
     dmarc: DmarcObservation | None = None
+    dkim: tuple[DkimObservation, ...] | None = None
     security: SecurityReport | None = None
     ptr_query: str | None = None
     view_record_types: tuple[str, ...] | None = None

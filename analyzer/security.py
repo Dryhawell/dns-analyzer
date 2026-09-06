@@ -6,9 +6,11 @@ that the domain is vulnerable or compromised.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from analyzer.dmarc import DmarcObservation
+from analyzer.dkim import DkimObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import CoreLookup
 from analyzer.records import describe_ip_scope
@@ -47,7 +49,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM observations."""
 
     def analyze(
         self,
@@ -55,11 +57,13 @@ class SecurityAnalyzer:
         dnssec: DnssecObservation,
         spf: SpfObservation,
         dmarc: DmarcObservation,
+        dkim: Sequence[DkimObservation] = (),
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
         findings.extend(self._spf(spf))
         findings.extend(self._dmarc(dmarc))
+        findings.extend(self._dkim(dkim))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -216,6 +220,73 @@ class SecurityAnalyzer:
                     code="dmarc_p_none",
                 )
             )
+        return findings
+
+    def _dkim(self, observations: Sequence[DkimObservation]) -> list[SecurityFinding]:
+        findings: list[SecurityFinding] = []
+        for item in observations:
+            if item.error:
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"DKIM selector {item.selector} could not be read",
+                        description=(
+                            f"{item.error} A timeout is not the same as a missing key, "
+                            "and it is not a compromise."
+                        ),
+                        recommendation="Retry the lookup before treating this selector as unpublished.",
+                        code="dkim_unreadable",
+                    )
+                )
+                continue
+            if item.status == "NOT DETECTED":
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"DKIM selector {item.selector} not published",
+                        description=(
+                            f"No v=DKIM1 TXT was found at {item.query_name}. "
+                            "The selector may be unused, misspelled, or unpublished. "
+                            "This is not proof that all mail is unsigned."
+                        ),
+                        recommendation=(
+                            "Confirm the selector from a signed message's DKIM-Signature "
+                            "header. This tool does not guess selector names."
+                        ),
+                        code="dkim_selector_missing",
+                    )
+                )
+                continue
+            if item.revoked:
+                findings.append(
+                    SecurityFinding(
+                        severity="medium",
+                        title=f"DKIM selector {item.selector} is revoked",
+                        description=(
+                            f"{item.query_name} has an empty p= tag. Receivers treat "
+                            "that selector as revoked. This is a key lifecycle signal, "
+                            "not proof of compromise."
+                        ),
+                        recommendation=(
+                            "If the selector is retired, keep p= empty. If mail still "
+                            "uses it, publish a new public key."
+                        ),
+                        code="dkim_revoked",
+                    )
+                )
+            if item.multiple_records:
+                findings.append(
+                    SecurityFinding(
+                        severity="low",
+                        title=f"Multiple DKIM records for selector {item.selector}",
+                        description=(
+                            "More than one v=DKIM1 TXT was found at this selector. "
+                            "Receivers may concatenate or ignore extra records."
+                        ),
+                        recommendation="Keep one DKIM TXT RR per selector (strings may still split).",
+                        code="dkim_multiple",
+                    )
+                )
         return findings
 
     def _caa(self, lookup: CoreLookup) -> list[SecurityFinding]:

@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.1.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.2.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -14,7 +14,7 @@ DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 
 1. Validates and normalizes the input
 2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, PTR)
-3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA)
+3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, optional DKIM)
 4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
 Three layers:
@@ -58,6 +58,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - Security findings with severity, description, recommendation, and a stable `code`
 - Transparent risk score (local heuristic, 0–100; not CVSS)
 - JSON (`dns-analyzer.report.v1`), CSV, and self-contained HTML export
+- Optional DKIM selector lookup (`--dkim`; selectors are never guessed)
 - Optional multi-resolver A/AAAA comparison from a JSON config (no hardcoded public DNS IPs)
 - File logging (`logs/dns-analyzer.log`; no secrets or rdata values)
 - Unit tests with mocks (no live nameservers)
@@ -142,6 +143,7 @@ python main.py example.com --all
 python main.py example.com --record A
 python main.py example.com --record MX --record NS
 python main.py example.com --security
+python main.py example.com --dkim google
 python main.py https://example.com/login
 python main.py example.com --timeout 3
 python main.py example.com --format json
@@ -159,6 +161,7 @@ python main.py --version
 | (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, findings, risk score |
 | `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
 | `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA) |
+| `--dkim SELECTOR` | TXT at `SELECTOR._domainkey.<domain>`. Repeatable (max 8). Never guessed |
 | `--record A --security` | That type plus the security sections |
 | `--reverse IP` | PTR only |
 | `--format json` / `csv` / `html` | Machine or HTML stdout (no human dump) |
@@ -166,7 +169,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.1.0` and exit |
+| `--version` | Print `dns-analyzer 1.2.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -210,6 +213,12 @@ Security sections only:
 
 ```bash
 python main.py example.com --security
+```
+
+One DKIM selector (from a mail header, not guessed):
+
+```bash
+python main.py example.com --dkim google
 ```
 
 JSON on stdout (pipe-friendly; no “DNS ANALYZER” banner):
@@ -259,7 +268,7 @@ JSON and CSV are for other programs, not for humans scraping the terminal. HTML 
 
 HTML uses inline CSS only: no JavaScript, no CDN. Record values are escaped (`&lt;script&gt;`) so a TXT string cannot inject markup.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
+JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `dkim` (only when `--dkim` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, including extra resolvers when comparison is on, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
@@ -310,7 +319,7 @@ Examples from the current weights:
 - Missing CAA: **+2**
 - TXT timeout: **+0** (unread is not treated as missing)
 
-A clean published set (DNSSEC visible, SPF `-all`, DMARC `p=reject`, CAA present, public A) scores **0**. Resolver comparison never adds points.
+A clean published set (DNSSEC visible, SPF `-all`, DMARC `p=reject`, CAA present, public A) scores **0**. Resolver comparison never adds points. A DKIM selector you asked for and that is missing scores **+0** (wrong selector is common). An empty `p=` (revoked key) scores **+8**.
 
 ---
 
@@ -340,7 +349,13 @@ These are **email authentication** signals in DNS. They do not encrypt mail. Abs
 
 RFC 7208 expects **one** `v=spf1` record at the name. This tool does not follow `include:` chains.
 
-**DKIM** (DomainKeys Identified Mail) uses a TXT record at a **selector** name, for example `google._domainkey.example.com`. The selector is chosen by the sender; this tool does **not** guess selectors in v1. DMARC still refers to DKIM alignment when mail is checked.
+**DKIM** (DomainKeys Identified Mail) uses a TXT record at a **selector** name, for example `google._domainkey.example.com`. The selector is chosen by the sender (see the `s=` tag in a `DKIM-Signature` mail header). This tool looks up selectors only when you pass `--dkim SELECTOR`. It does **not** brute-force `google`, `s1`, `default`, or any other list.
+
+```bash
+python main.py example.com --dkim google --dkim s1
+```
+
+`FOUND` means that selector published `v=DKIM1` with a non-empty `p=`. Empty `p=` is **revoked**. NXDOMAIN / no DKIM TXT is **NOT DETECTED** for that selector only — other selectors may still exist. Timeout is unread, not “DKIM missing”. The CLI prints key type and key length, not the raw public key.
 
 **DMARC** is a TXT record at `_dmarc.example.com` (`v=DMARC1`). It tells receivers what to do when mail is not aligned with SPF and/or DKIM.
 
@@ -384,7 +399,7 @@ dns-analyzer/
 │   ├── models.py                # DNSRecord, CoreLookup
 │   ├── reverse.py               # IP → PTR name
 │   ├── ttl.py                   # cache-lifetime wording
-│   ├── dnssec.py / spf.py / dmarc.py
+│   ├── dnssec.py / spf.py / dmarc.py / dkim.py
 │   ├── security.py / risk.py
 │   ├── config.py / compare.py   # named resolvers, A/AAAA diff
 │   └── result.py                # one run, ready to export
@@ -406,7 +421,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -417,7 +432,8 @@ If a test needs the network, it does not belong in this suite.
 - Not a vulnerability scanner
 - Absence of DNSSEC / SPF / DMARC / CAA is a signal, not automatic critical risk
 - DNSSEC here is **visibility to this resolver**, not validation to the IANA root
-- SPF `include:` chains are not followed; DKIM selectors are not discovered
+- SPF `include:` chains are not followed
+- DKIM selectors are **opt-in** (`--dkim`); they are never brute-forced or guessed
 - Documentation addresses (`192.0.2.0/24`, `2001:db8::/32`, …) are labeled, not scored as private LAN
 - The risk score is a local heuristic, not a security standard
 - Different answers from two resolvers are not proof of hijacking
@@ -434,7 +450,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.1.0** adds HTML reports. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.2.0** adds opt-in DKIM selector lookup. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

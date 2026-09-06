@@ -77,6 +77,7 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=None
     )
+    mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     output = capsys.readouterr().out
     assert "Target:" in output
     assert "example.com" in output
@@ -324,6 +325,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     assert "RISK SCORE" not in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
     mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
+    mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A",)
     )
@@ -427,10 +429,69 @@ def test_cli_rejects_reverse_with_security(capsys) -> None:
     assert "--reverse" in capsys.readouterr().err
 
 
+def test_cli_rejects_reverse_with_dkim(capsys) -> None:
+    assert run(["--reverse", "8.8.8.8", "--dkim", "google"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
+def test_cli_rejects_invalid_dkim_selector(capsys) -> None:
+    assert run(["example.com", "--dkim", "*.google"]) == 1
+    assert "Invalid DKIM selector" in capsys.readouterr().err
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_dkim_prints_section(mock_resolver_cls, capsys) -> None:
+    from analyzer.dkim import evaluate_dkim
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_dkim.return_value = evaluate_dkim(
+        "google._domainkey.example.com",
+        "google",
+        [DNSRecord("TXT", "google._domainkey.example.com", "v=DKIM1; k=rsa; p=MIIBIjAN", 300)],
+    )
+
+    assert run(["example.com", "--record", "A", "--dkim", "google"]) == 0
+    output = capsys.readouterr().out
+    assert "DKIM" in output
+    assert "google._domainkey.example.com" in output
+    assert "FOUND" in output
+    assert "present" in output
+    assert "MIIBIjAN" not in output
+    assert "SECURITY ANALYSIS" not in output
+    mock_resolver_cls.return_value.inspect_dkim.assert_called_once_with(
+        "example.com", "google"
+    )
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_dkim_json_includes_observation(mock_resolver_cls, capsys) -> None:
+    from analyzer.dkim import evaluate_dkim
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_dkim.return_value = evaluate_dkim(
+        "google._domainkey.example.com",
+        "google",
+        [DNSRecord("TXT", "google._domainkey.example.com", "v=DKIM1; p=MIIB", 300)],
+    )
+
+    assert run(["example.com", "--dkim", "google", "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["dkim"][0]["selector"] == "google"
+    assert data["dkim"][0]["status"] == "FOUND"
+
+
 def test_cli_help_lists_modes() -> None:
     help_text = build_parser().format_help()
     assert "--record" in help_text
     assert "--security" in help_text
+    assert "--dkim" in help_text
     assert "--all" in help_text
     assert "--reverse" in help_text
     assert "--format" in help_text

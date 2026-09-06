@@ -30,6 +30,7 @@ from analyzer.config import (
     settings_from_nameservers,
 )
 from analyzer.dmarc import DmarcObservation
+from analyzer.dkim import DkimObservation, DkimSelectorError, normalize_selectors
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
     DNSNetworkError,
@@ -73,6 +74,7 @@ Examples:
   python main.py example.com --record A
   python main.py example.com --record MX --record NS
   python main.py example.com --security
+  python main.py example.com --dkim google
   python main.py example.com --format json
   python main.py example.com --format html --output reports/example_com.html
   python main.py example.com --output reports/example_com.json
@@ -82,8 +84,9 @@ Examples:
 
 Default (no --record / --security) is the same as --all: every record
 type plus DNSSEC, SPF, DMARC, findings, and the local risk score.
+--dkim SELECTOR is opt-in; selectors are never guessed.
 
-This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, or CAA
+This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, or CAA
 is an observation, not proof of compromise.
 """
 
@@ -158,6 +161,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--security",
         action="store_true",
         help="Show DNSSEC, SPF, DMARC, findings, and the local risk score",
+    )
+    parser.add_argument(
+        "--dkim",
+        action="append",
+        dest="dkim_selectors",
+        metavar="SELECTOR",
+        help=(
+            "Look up this DKIM selector (TXT at SELECTOR._domainkey.<domain>). "
+            "Repeatable, max 8. Selectors are never guessed."
+        ),
     )
     parser.add_argument(
         "--all",
@@ -246,8 +259,8 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
     has_filter = bool(selected)
     if args.all and (has_filter or args.security):
         return "Do not combine --all with --record or --security. --all is the full report."
-    if args.reverse and (has_filter or args.security or args.all):
-        return "Use either a domain (with --record/--security/--all) or --reverse, not both."
+    if args.reverse and (has_filter or args.security or args.all or args.dkim_selectors):
+        return "Use either a domain (with --record/--security/--all/--dkim) or --reverse, not both."
 
     if args.all or (not has_filter and not args.security):
         return ReportView(record_types=None, show_security=True)
@@ -550,6 +563,7 @@ def _print_lookup(
     dmarc: DmarcObservation | None,
     security: SecurityReport | None,
     view: ReportView,
+    dkim: tuple[DkimObservation, ...] | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -573,6 +587,9 @@ def _print_lookup(
         if "CAA" in wanted:
             _print_caa_section(lookup.caa, errors)
         _print_ttl_summary(_selected_records(lookup, types))
+    if dkim:
+        for item in dkim:
+            _print_dkim(item)
     if view.show_security:
         if dnssec is None or spf is None or dmarc is None or security is None:
             raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC results.")
@@ -634,6 +651,27 @@ def _print_dmarc(observation: DmarcObservation) -> None:
             print(f"rua={observation.rua}")
         if observation.multiple_records:
             print("Note: multiple v=DMARC1 TXT records (receivers may ignore DMARC).")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_dkim(observation: DkimObservation) -> None:
+    print("DKIM")
+    print("────────────────────────")
+    print(f"Selector: {observation.selector}")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.key_type:
+        print(f"Key type: {observation.key_type}")
+    if observation.revoked:
+        print("Public key: empty (p=) — this selector is revoked")
+    elif observation.key_present:
+        print(f"Public key: present ({observation.key_chars} characters)")
+    if observation.multiple_records:
+        print("Note: multiple v=DKIM1 TXT records at this selector.")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -831,6 +869,7 @@ def _print_usage() -> None:
     print("Usage: python main.py <domain>")
     print("       python main.py <domain> --record A")
     print("       python main.py <domain> --security")
+    print("       python main.py <domain> --dkim google")
     print("       python main.py <domain> --format json")
     print("       python main.py <domain> --format html --output reports/example.html")
     print("       python main.py <domain> --output reports/example.json")
@@ -917,6 +956,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.config_path
             or args.nameservers
             or args.resolver_names
+            or args.dkim_selectors
         )
         if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
@@ -939,6 +979,16 @@ def _run(argv: list[str] | None = None) -> int:
     except DomainValidationError as exc:
         _configure_logging()
         _log.error("Invalid domain")
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        selectors = (
+            normalize_selectors(args.dkim_selectors) if args.dkim_selectors else ()
+        )
+    except DkimSelectorError as exc:
+        _configure_logging()
+        _log.error("Invalid DKIM selector")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -967,15 +1017,41 @@ def _run(argv: list[str] | None = None) -> int:
     spf = None
     dmarc = None
     security = None
+    dkim_observations = None
     try:
         if view.show_security:
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            workers = 2 + len(selectors)
+            with ThreadPoolExecutor(max_workers=min(8, max(2, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
+                fut_dkim = [
+                    pool.submit(resolver.inspect_dkim, domain, sel)
+                    for sel in selectors
+                ]
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
+                if selectors:
+                    dkim_observations = tuple(item.result() for item in fut_dkim)
             spf = inspect_spf(lookup.txt, lookup.errors)
-            security = SecurityAnalyzer().analyze(lookup, dnssec, spf, dmarc)
+            security = SecurityAnalyzer().analyze(
+                lookup,
+                dnssec,
+                spf,
+                dmarc,
+                dkim_observations or (),
+            )
+        elif selectors:
+            if len(selectors) >= 2:
+                with ThreadPoolExecutor(max_workers=min(8, len(selectors))) as pool:
+                    futures = [
+                        pool.submit(resolver.inspect_dkim, domain, sel)
+                        for sel in selectors
+                    ]
+                    dkim_observations = tuple(item.result() for item in futures)
+            else:
+                dkim_observations = tuple(
+                    resolver.inspect_dkim(domain, sel) for sel in selectors
+                )
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
         _print_dns_failure(exc, domain)
@@ -1009,6 +1085,7 @@ def _run(argv: list[str] | None = None) -> int:
         dnssec=dnssec,
         spf=spf,
         dmarc=dmarc,
+        dkim=dkim_observations,
         security=security,
         view_record_types=_view_record_types(view),
         view_security=view.show_security,
@@ -1026,7 +1103,7 @@ def _run(argv: list[str] | None = None) -> int:
             print("Resolver:")
             print(settings.primary.name)
             print()
-        _print_lookup(lookup, dnssec, spf, dmarc, security, view)
+        _print_lookup(lookup, dnssec, spf, dmarc, security, view, dkim_observations)
         if comparison is not None:
             _print_comparison(comparison)
 

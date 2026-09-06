@@ -1,6 +1,7 @@
 """Core DNS analysis package."""
 
 from analyzer.dmarc import DmarcObservation, evaluate_dmarc
+from analyzer.dkim import DkimObservation, evaluate_dkim
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
     DNSQueryError,
@@ -47,4 +48,6 @@ __all__ = [
     "SpfObservation",
     "DmarcObservation",
     "evaluate_dmarc",
+    "DkimObservation",
+    "evaluate_dkim",
 ]

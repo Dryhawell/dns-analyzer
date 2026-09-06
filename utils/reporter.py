@@ -15,6 +15,7 @@ from pathlib import Path
 
 from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
+from analyzer.dkim import DkimObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import DNSRecord
 from analyzer.result import DNSAnalysisResult
@@ -58,6 +59,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "dnssec": _dnssec_dict(result.dnssec),
         "spf": _spf_dict(result.spf),
         "dmarc": _dmarc_dict(result.dmarc),
+        "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -185,6 +187,22 @@ def _dmarc_dict(observation: DmarcObservation | None) -> dict[str, object] | Non
     }
 
 
+def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "selector": observation.selector,
+        "query_name": observation.query_name,
+        "record": observation.record,
+        "key_type": observation.key_type,
+        "key_chars": observation.key_chars,
+        "key_present": observation.key_present,
+        "revoked": observation.revoked,
+        "multiple_records": observation.multiple_records,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _security_dict(report: SecurityReport | None) -> dict[str, object] | None:
     if report is None:
         return None
@@ -278,6 +296,9 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_spf(result.spf))
     if result.dmarc is not None:
         parts.extend(_html_dmarc(result.dmarc))
+    if result.dkim:
+        for item in result.dkim:
+            parts.extend(_html_dkim(item))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -385,6 +406,25 @@ def _html_dmarc(observation: DmarcObservation) -> list[str]:
         parts.append(f"<p><code>{_e(observation.record)}</code></p>")
         if observation.policy:
             parts.append(f"<p>p={_e(observation.policy)} {_e(observation.policy_meaning)}</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_dkim(observation: DkimObservation) -> list[str]:
+    parts = [
+        "<h2>DKIM</h2>",
+        f"<p>Selector: <code>{_e(observation.selector)}</code></p>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.key_type:
+        parts.append(f"<p>Key type: {_e(observation.key_type)}</p>")
+    if observation.revoked:
+        parts.append("<p>Public key: empty (p=) — this selector is revoked</p>")
+    elif observation.key_present:
+        parts.append(f"<p>Public key: present ({observation.key_chars} characters)</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
