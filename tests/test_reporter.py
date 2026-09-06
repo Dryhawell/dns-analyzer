@@ -1,4 +1,4 @@
-"""JSON/CSV export tests. No network access."""
+"""JSON/CSV/HTML export tests. No network access."""
 
 import json
 from pathlib import Path
@@ -9,14 +9,17 @@ from analyzer.models import CoreLookup, DNSRecord
 from analyzer.result import DNSAnalysisResult
 from analyzer.security import SecurityAnalyzer
 from analyzer.spf import inspect_spf
+from analyzer.version import __version__
 from utils.reporter import (
     SCHEMA,
     dumps_csv,
+    dumps_html,
     dumps_json,
     format_from_suffix,
     result_to_dict,
     suggested_report_path,
     write_csv,
+    write_html,
     write_json,
     write_report,
 )
@@ -40,7 +43,7 @@ def _result(**overrides) -> DNSAnalysisResult:
 def test_json_contains_required_keys() -> None:
     payload = result_to_dict(_result())
     assert payload["schema"] == SCHEMA
-    assert payload["tool_version"] == "1.0.0"
+    assert payload["tool_version"] == __version__
     assert payload["target"] == "example.com"
     assert payload["mode"] == "forward"
     assert payload["scan_time"] == "2026-09-03T11:00:00+00:00"
@@ -106,9 +109,47 @@ def test_write_json_and_csv_roundtrip(tmp_path: Path) -> None:
     assert "mail.example.com" in csv_path.read_text(encoding="utf-8")
 
 
+def test_html_contains_target_and_disclaimer() -> None:
+    page = dumps_html(_result())
+    assert "<!DOCTYPE html>" in page
+    assert "example.com" in page
+    assert "not a vulnerability scanner" in page.lower()
+    assert "<script" not in page.lower()
+    assert "93.184.216.34" in page
+    assert "mail.example.com" in page
+    assert "DNS query timed out" in page
+
+
+def test_html_escapes_script_in_txt() -> None:
+    page = dumps_html(
+        _result(
+            records=(
+                DNSRecord(
+                    "TXT",
+                    "example.com",
+                    '<script>alert(1)</script>',
+                    60,
+                ),
+            )
+        )
+    )
+    assert "<script>" not in page
+    assert "&lt;script&gt;" in page
+    assert "alert(1)" in page
+
+
+def test_write_html_roundtrip(tmp_path: Path) -> None:
+    path = tmp_path / "nested" / "out.html"
+    write_html(path, _result())
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("<!DOCTYPE html>")
+    assert "example.com" in text
+
+
 def test_format_from_suffix() -> None:
     assert format_from_suffix(Path("a.JSON")) == "json"
     assert format_from_suffix(Path("a.csv")) == "csv"
+    assert format_from_suffix(Path("a.HTML")) == "html"
     assert format_from_suffix(Path("a.txt")) is None
 
 

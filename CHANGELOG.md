@@ -2,6 +2,20 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.1.0 — 2026-09-06
+
+HTML reports for sharing a scan in a browser. JSON remains the machine schema.
+
+### Added
+
+- `--format html` and `.html` `--output` paths: a self-contained page (inline CSS, no JavaScript, no CDN)
+- DNS values are HTML-escaped so a TXT string cannot inject markup
+
+### Notes
+
+- HTML is for humans. Automate against JSON (`dns-analyzer.report.v1`), not the HTML DOM
+- Still not a vulnerability scanner
+
 ## 1.0.0 — 2026-09-04
 
 First stable release. The CLI analyzes how a name is published in DNS and reports configuration signals. It is **not** a vulnerability scanner.

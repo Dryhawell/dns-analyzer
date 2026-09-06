@@ -10,6 +10,7 @@ from analyzer.dmarc import evaluate_dmarc
 from analyzer.dnssec import evaluate_dnssec
 from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
+from analyzer.version import __version__
 from cli.interface import ExportPlan, ReportView, build_parser, plan_export, run, types_to_query
 
 
@@ -451,7 +452,7 @@ def test_cli_version_exits_zero(capsys) -> None:
     with pytest.raises(SystemExit) as caught:
         run(["--version"])
     assert caught.value.code == 0
-    assert "1.0.0" in capsys.readouterr().out
+    assert __version__ in capsys.readouterr().out
 
 
 @patch("cli.interface.DNSResolver")
@@ -493,6 +494,26 @@ def test_cli_format_csv_stdout(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A",)
     )
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_format_html_stdout(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+            txt=[DNSRecord("TXT", "example.com", "<script>alert(1)</script>", 60)],
+        ),
+    )
+
+    assert run(["example.com", "--format", "html", "--record", "A", "--record", "TXT"]) == 0
+    captured = capsys.readouterr()
+    assert "DNS ANALYZER" not in captured.out
+    assert captured.out.startswith("<!DOCTYPE html>")
+    assert "not a vulnerability scanner" in captured.out.lower()
+    assert "<script>" not in captured.out
+    assert "&lt;script&gt;" in captured.out
+    assert "93.184.216.34" in captured.out
 
 
 @patch("cli.interface.DNSResolver")
@@ -544,7 +565,7 @@ def test_cli_reverse_format_json(mock_resolver_cls, capsys) -> None:
 
 def test_cli_rejects_output_txt_in_text_mode(capsys) -> None:
     assert run(["example.com", "--output", "out.txt"]) == 1
-    assert ".json or .csv" in capsys.readouterr().err
+    assert ".json, .csv, or .html" in capsys.readouterr().err
 
 
 def test_cli_rejects_format_output_mismatch(capsys) -> None:
@@ -634,6 +655,21 @@ def test_plan_export_json_stdout() -> None:
     assert plan.print_human is False
     assert plan.file_format == "json"
     assert plan.path is None
+
+
+def test_plan_export_html_stdout() -> None:
+    plan = plan_export("html", None)
+    assert isinstance(plan, ExportPlan)
+    assert plan.print_human is False
+    assert plan.file_format == "html"
+    assert plan.path is None
+
+
+def test_plan_export_text_html_file() -> None:
+    plan = plan_export("text", "reports/out.html")
+    assert isinstance(plan, ExportPlan)
+    assert plan.print_human is True
+    assert plan.file_format == "html"
 
 
 def test_types_to_query_default_is_all() -> None:

@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.0.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.1.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -15,7 +15,7 @@ DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 1. Validates and normalizes the input
 2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, PTR)
 3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA)
-4. Prints a readable CLI report and can export JSON or CSV
+4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
 Three layers:
 
@@ -57,12 +57,12 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - Reverse DNS (`PTR`)
 - Security findings with severity, description, recommendation, and a stable `code`
 - Transparent risk score (local heuristic, 0–100; not CVSS)
-- JSON (`dns-analyzer.report.v1`) and CSV export
+- JSON (`dns-analyzer.report.v1`), CSV, and self-contained HTML export
 - Optional multi-resolver A/AAAA comparison from a JSON config (no hardcoded public DNS IPs)
 - File logging (`logs/dns-analyzer.log`; no secrets or rdata values)
 - Unit tests with mocks (no live nameservers)
 
-**Not in v1:** GUI, aggressive subdomain brute-force, WHOIS, geolocation, HTML/PDF reports, DKIM selector hunting.
+**Not in this release:** GUI, aggressive subdomain brute-force, WHOIS, geolocation, PDF reports, DKIM selector hunting.
 
 ---
 
@@ -145,6 +145,7 @@ python main.py example.com --security
 python main.py https://example.com/login
 python main.py example.com --timeout 3
 python main.py example.com --format json
+python main.py example.com --format html --output reports/example_com.html
 python main.py example.com --output reports/example_com.json
 python main.py example.com --format csv --output reports/example_com.csv
 python main.py example.com --config config/resolvers.example.json
@@ -160,12 +161,12 @@ python main.py --version
 | `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA) |
 | `--record A --security` | That type plus the security sections |
 | `--reverse IP` | PTR only |
-| `--format json` / `csv` | Machine-readable stdout (no human dump) |
-| `--output PATH` | Write `.json` or `.csv`; with default text mode the human report still prints |
+| `--format json` / `csv` / `html` | Machine or HTML stdout (no human dump) |
+| `--output PATH` | Write `.json`, `.csv`, or `.html`; with default text mode the human report still prints |
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.0.0` and exit |
+| `--version` | Print `dns-analyzer 1.1.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -217,6 +218,12 @@ JSON on stdout (pipe-friendly; no “DNS ANALYZER” banner):
 python main.py example.com --format json
 ```
 
+HTML file (open in a browser; no JavaScript):
+
+```bash
+python main.py example.com --format html --output reports/example_com.html
+```
+
 Human report plus a JSON file:
 
 ```bash
@@ -241,13 +248,16 @@ python main.py --help
 
 ---
 
-## JSON / CSV
+## JSON / CSV / HTML
 
-Reports are for other programs, not for humans scraping the terminal.
+JSON and CSV are for other programs, not for humans scraping the terminal. HTML is a printable page for people.
 
 - **`--format json`** — JSON on stdout (no CLI dump). Pipe into `jq` or another tool.
+- **`--format html`** — self-contained HTML on stdout (no CLI dump). Prefer `--output file.html`.
 - **`--output file.json`** — write the file; default text mode still prints the human report.
-- **CSV** — one row per record (`record_type,name,value,ttl,priority`). Findings and the risk score are JSON-only.
+- **CSV** — one row per record (`record_type,name,value,ttl,priority`). Findings and the risk score are JSON/HTML, not CSV.
+
+HTML uses inline CSS only: no JavaScript, no CDN. Record values are escaped (`&lt;script&gt;`) so a TXT string cannot inject markup.
 
 JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
@@ -380,7 +390,7 @@ dns-analyzer/
 │   └── result.py                # one run, ready to export
 ├── cli/interface.py             # argparse, human output, exit codes
 ├── utils/logger.py              # rotating file log
-├── utils/reporter.py            # JSON / CSV
+├── utils/reporter.py            # JSON / CSV / HTML
 ├── reports/                     # generated files (gitignored)
 ├── logs/                        # application logs (gitignored)
 └── tests/                       # pytest, mocked DNS
@@ -396,7 +406,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -424,9 +434,9 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.0.0** is the first stable CLI. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.1.0** adds HTML reports. History: [CHANGELOG.md](CHANGELOG.md).
 
-Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, HTML/PDF reports. Enumeration, if added, stays opt-in and for domains you are allowed to test.
+Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 
 ---
 

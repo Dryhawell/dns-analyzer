@@ -54,6 +54,7 @@ from analyzer.version import __version__
 from utils.logger import configure_logging, get_logger
 from utils.reporter import (
     dumps_csv,
+    dumps_html,
     dumps_json,
     format_from_suffix,
     write_report,
@@ -73,6 +74,7 @@ Examples:
   python main.py example.com --record MX --record NS
   python main.py example.com --security
   python main.py example.com --format json
+  python main.py example.com --format html --output reports/example_com.html
   python main.py example.com --output reports/example_com.json
   python main.py example.com --config config/resolvers.example.json
   python main.py --reverse 8.8.8.8 --format csv
@@ -100,7 +102,7 @@ class ReportView:
 
 @dataclass(frozen=True)
 class ExportPlan:
-    """Human stdout vs machine export (JSON/CSV)."""
+    """Human stdout vs machine export (JSON/CSV/HTML)."""
 
     print_human: bool
     file_format: str | None
@@ -176,15 +178,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--format",
-        choices=("text", "json", "csv"),
+        choices=("text", "json", "csv", "html"),
         default="text",
         dest="export_format",
-        help="text (default CLI), json, or csv. json/csv go to stdout unless --output is set",
+        help="text (default CLI), json, csv, or html. json/csv/html go to stdout unless --output is set",
     )
     parser.add_argument(
         "--output",
         metavar="PATH",
-        help="Write JSON or CSV to this path. With --format text, suffix must be .json or .csv",
+        help="Write JSON, CSV, or HTML to this path. With --format text, suffix must be .json, .csv, or .html",
     )
     parser.add_argument(
         "--config",
@@ -271,7 +273,7 @@ def types_to_query(view: ReportView) -> tuple[str, ...] | None:
 
 
 def plan_export(export_format: str, output: str | None) -> ExportPlan | str:
-    """Decide human vs JSON/CSV stdout vs file. Returns an error string on conflict."""
+    """Decide human vs JSON/CSV/HTML stdout vs file. Returns an error string on conflict."""
     if export_format == "text":
         if not output:
             return ExportPlan(print_human=True, file_format=None, path=None)
@@ -279,8 +281,8 @@ def plan_export(export_format: str, output: str | None) -> ExportPlan | str:
         inferred = format_from_suffix(path)
         if inferred is None:
             return (
-                "When using --output in text mode, the path must end in .json or .csv "
-                "(or pass --format json / --format csv)."
+                "When using --output in text mode, the path must end in .json, .csv, or .html "
+                "(or pass --format json / --format csv / --format html)."
             )
         return ExportPlan(print_human=True, file_format=inferred, path=path)
 
@@ -348,17 +350,20 @@ def _view_record_types(view: ReportView) -> tuple[str, ...] | None:
 
 
 def _emit_export(result: DNSAnalysisResult, export: ExportPlan) -> str | None:
-    """Write JSON/CSV to a file or stdout. Return an error message on failure."""
+    """Write JSON/CSV/HTML to a file or stdout. Return an error message on failure."""
     if export.file_format is None:
         return None
+    dumpers = {"json": dumps_json, "csv": dumps_csv, "html": dumps_html}
     try:
         if export.path is not None:
             write_report(export.path, result, export.file_format)
             _log.info("Wrote report %s", export.path)
             print(f"Wrote {export.path}", file=sys.stderr)
             return None
-        text = dumps_json(result) if export.file_format == "json" else dumps_csv(result)
-        sys.stdout.write(text)
+        dump = dumpers.get(export.file_format)
+        if dump is None:
+            return f"Unsupported export format: {export.file_format}"
+        sys.stdout.write(dump(result))
         _log.info("Wrote %s report to stdout", export.file_format)
         return None
     except OSError as exc:
@@ -827,6 +832,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --record A")
     print("       python main.py <domain> --security")
     print("       python main.py <domain> --format json")
+    print("       python main.py <domain> --format html --output reports/example.html")
     print("       python main.py <domain> --output reports/example.json")
     print("       python main.py <domain> --config config/resolvers.example.json")
     print("       python main.py --reverse <ip>")
