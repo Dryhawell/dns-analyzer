@@ -42,6 +42,7 @@ from analyzer.exceptions import (
     ResolverConfigError,
 )
 from analyzer.models import CoreLookup, DNSRecord
+from analyzer.mtasts import MtaStsObservation
 from analyzer.records import describe_ip_scope
 from analyzer.resolver import DNSResolver
 from analyzer.result import DNSAnalysisResult
@@ -85,12 +86,12 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-or SRV is an observation, not proof of compromise.
+MTA-STS, or SRV is an observation, not proof of compromise.
 """
 
 
@@ -99,7 +100,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -164,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -611,6 +612,7 @@ def _print_lookup(
     view: ReportView,
     dkim: tuple[DkimObservation, ...] | None = None,
     srv: tuple[SrvObservation, ...] | None = None,
+    mta_sts: MtaStsObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -657,11 +659,12 @@ def _print_lookup(
         for item in srv:
             _print_srv(item)
     if view.show_security:
-        if dnssec is None or spf is None or dmarc is None or security is None:
-            raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC results.")
+        if dnssec is None or spf is None or dmarc is None or mta_sts is None or security is None:
+            raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC/MTA-STS results.")
         _print_dnssec(dnssec)
         _print_spf(spf)
         _print_dmarc(dmarc)
+        _print_mta_sts(mta_sts)
         _print_security(security)
 
 
@@ -731,6 +734,28 @@ def _print_dmarc(observation: DmarcObservation) -> None:
             print(f"rua={observation.rua}")
         if observation.multiple_records:
             print("Note: multiple v=DMARC1 TXT records (receivers may ignore DMARC).")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_mta_sts(observation: MtaStsObservation) -> None:
+    print("MTA-STS")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Policy host: {observation.policy_host} (HTTPS file not fetched)")
+    print(f"Status: {observation.status}")
+    if observation.record:
+        print("TXT:")
+        print(observation.record)
+        if observation.policy_id:
+            print(f"id={observation.policy_id}")
+        else:
+            print("id= (missing)")
+        if observation.multiple_records:
+            print("Note: multiple v=STSv1 TXT records (receivers may ignore the id).")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1128,12 +1153,14 @@ def _run(argv: list[str] | None = None) -> int:
     security = None
     dkim_observations = None
     srv_observations = None
+    mta_sts = None
     try:
         if view.show_security:
-            workers = 2 + len(selectors) + len(srv_specs)
-            with ThreadPoolExecutor(max_workers=min(8, max(2, workers))) as pool:
+            workers = 3 + len(selectors) + len(srv_specs)
+            with ThreadPoolExecutor(max_workers=min(8, max(3, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
+                fut_mtasts = pool.submit(resolver.inspect_mta_sts, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1144,6 +1171,7 @@ def _run(argv: list[str] | None = None) -> int:
                 ]
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
+                mta_sts = fut_mtasts.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1157,6 +1185,7 @@ def _run(argv: list[str] | None = None) -> int:
                 dmarc,
                 dkim_observations or (),
                 srv_observations or (),
+                mta_sts,
             )
         elif selectors or srv_specs:
             extra = len(selectors) + len(srv_specs)
@@ -1216,6 +1245,7 @@ def _run(argv: list[str] | None = None) -> int:
         dnssec=dnssec,
         spf=spf,
         dmarc=dmarc,
+        mta_sts=mta_sts,
         dkim=dkim_observations,
         srv=srv_observations,
         security=security,
@@ -1244,6 +1274,7 @@ def _run(argv: list[str] | None = None) -> int:
             view,
             dkim_observations,
             srv_observations,
+            mta_sts,
         )
         if comparison is not None:
             _print_comparison(comparison)

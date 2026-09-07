@@ -22,6 +22,7 @@ import dns.resolver
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
+from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts, mta_sts_policy_host, mta_sts_query_name
 from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
 
@@ -217,6 +218,18 @@ class DNSResolver:
         except DNSQueryError as exc:
             return evaluate_dmarc(qname, (), error=str(exc))
         return evaluate_dmarc(qname, records)
+
+    def inspect_mta_sts(self, name: str) -> MtaStsObservation:
+        """TXT lookup at _mta-sts.<name>. Does not fetch the HTTPS policy."""
+        qname = mta_sts_query_name(name)
+        host = mta_sts_policy_host(name)
+        try:
+            records = self.resolve_txt(qname)
+        except DomainNotFoundError:
+            return evaluate_mta_sts(qname, host, ())
+        except DNSQueryError as exc:
+            return evaluate_mta_sts(qname, host, (), error=str(exc))
+        return evaluate_mta_sts(qname, host, records)
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

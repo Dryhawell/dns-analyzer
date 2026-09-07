@@ -10,6 +10,7 @@ from analyzer.dmarc import evaluate_dmarc
 from analyzer.dnssec import evaluate_dnssec
 from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
+from analyzer.mtasts import evaluate_mta_sts
 from analyzer.version import __version__
 from cli.interface import ExportPlan, ReportView, build_parser, plan_export, run, types_to_query
 
@@ -61,10 +62,19 @@ def _dmarc(record: str | None = None) -> object:
     return evaluate_dmarc(qname, [DNSRecord("TXT", qname, record, 300)])
 
 
-def _bind(mock_cls, lookup: CoreLookup, dnssec=None, dmarc=None) -> None:
+def _mtasts(record: str | None = None) -> object:
+    qname = "_mta-sts.example.com"
+    host = "mta-sts.example.com"
+    if record is None:
+        return evaluate_mta_sts(qname, host, ())
+    return evaluate_mta_sts(qname, host, [DNSRecord("TXT", qname, record, 300)])
+
+
+def _bind(mock_cls, lookup: CoreLookup, dnssec=None, dmarc=None, mtasts=None) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
     mock_cls.return_value.inspect_dmarc.return_value = dmarc or _dmarc()
+    mock_cls.return_value.inspect_mta_sts.return_value = mtasts or _mtasts()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -316,6 +326,24 @@ def test_cli_prints_dmarc_reject(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_mta_sts(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        mtasts=_mtasts("v=STSv1; id=20160831085700Z"),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "MTA-STS" in output
+    assert "Status: FOUND" in output
+    assert "_mta-sts.example.com" in output
+    assert "id=20160831085700Z" in output
+    assert "HTTPS file not fetched" in output
+    mock_resolver_cls.return_value.inspect_mta_sts.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -409,6 +437,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     assert "RISK SCORE" not in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
     mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
+    mock_resolver_cls.return_value.inspect_mta_sts.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -709,6 +738,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["security_analysis"]["findings"]
     assert data["dkim"] is None
     assert data["srv"] is None
+    assert data["mta_sts"]["query_name"] == "_mta-sts.example.com"
 
 
 @patch("cli.interface.DNSResolver")

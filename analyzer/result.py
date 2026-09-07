@@ -13,6 +13,7 @@ from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import DNSRecord
+from analyzer.mtasts import MtaStsObservation
 from analyzer.security import SecurityReport
 from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
@@ -31,6 +32,7 @@ class DNSAnalysisResult:
     dnssec: DnssecObservation | None = None
     spf: SpfObservation | None = None
     dmarc: DmarcObservation | None = None
+    mta_sts: MtaStsObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     security: SecurityReport | None = None

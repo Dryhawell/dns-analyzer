@@ -419,6 +419,47 @@ def test_srv_timeout_is_info_unreadable() -> None:
     assert report.risk.value == 0
 
 
+def test_mta_sts_missing_is_info_and_unscored() -> None:
+    from analyzer.mtasts import evaluate_mta_sts
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_mta_sts("_mta-sts.example.com", "mta-sts.example.com", ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        mta_sts=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "mtasts_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["mtasts_missing"] == 0
+    assert report.risk.value == 0
+
+
+def test_mta_sts_found_with_id_adds_no_points() -> None:
+    from analyzer.mtasts import evaluate_mta_sts
+
+    observation = evaluate_mta_sts(
+        "_mta-sts.example.com",
+        "mta-sts.example.com",
+        [DNSRecord("TXT", "_mta-sts.example.com", "v=STSv1; id=abc", 300)],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        mta_sts=observation,
+    )
+    assert not any(item.code.startswith("mtasts_") for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

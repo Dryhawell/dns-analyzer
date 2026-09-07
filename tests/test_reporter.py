@@ -53,6 +53,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["errors"][0]["section"] == "CAA"
     assert payload["dnssec"] is None
     assert payload["dmarc"] is None
+    assert payload["mta_sts"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -231,4 +232,33 @@ def test_json_and_html_include_srv() -> None:
         )
     )
     assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_mta_sts() -> None:
+    from analyzer.mtasts import evaluate_mta_sts
+
+    observation = evaluate_mta_sts(
+        "_mta-sts.example.com",
+        "mta-sts.example.com",
+        [DNSRecord("TXT", "_mta-sts.example.com", "v=STSv1; id=20160831085700Z", 300)],
+    )
+    result = _result(mta_sts=observation)
+    payload = result_to_dict(result)
+    assert payload["mta_sts"]["status"] == "FOUND"
+    assert payload["mta_sts"]["id"] == "20160831085700Z"
+    assert payload["mta_sts"]["policy_host"] == "mta-sts.example.com"
+    page = dumps_html(result)
+    assert "_mta-sts.example.com" in page
+    assert "20160831085700Z" in page
+    xss = dumps_html(
+        _result(
+            mta_sts=evaluate_mta_sts(
+                "_mta-sts.example.com",
+                "mta-sts.example.com",
+                [DNSRecord("TXT", "_mta-sts.example.com", 'v=STSv1; id=<script>x</script>', 300)],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
     assert "&lt;script&gt;" in xss

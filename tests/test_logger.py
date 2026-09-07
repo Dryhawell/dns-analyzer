@@ -12,6 +12,7 @@ def _bind_lookup(mock_cls) -> None:
     from analyzer.dmarc import evaluate_dmarc
     from analyzer.dnssec import evaluate_dnssec
     from analyzer.models import CoreLookup
+    from analyzer.mtasts import evaluate_mta_sts
 
     mock_cls.return_value.lookup_core.return_value = CoreLookup(
         a=(DNSRecord("A", "example.com", "93.184.216.34", 60),),
@@ -28,6 +29,9 @@ def _bind_lookup(mock_cls) -> None:
     )
     mock_cls.return_value.inspect_dmarc.return_value = evaluate_dmarc(
         "_dmarc.example.com", ()
+    )
+    mock_cls.return_value.inspect_mta_sts.return_value = evaluate_mta_sts(
+        "_mta-sts.example.com", "mta-sts.example.com", ()
     )
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 

@@ -2,6 +2,21 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.6.0 — 2026-09-07
+
+MTA-STS DNS discovery (RFC 8461). The HTTPS policy file is not fetched.
+
+### Added
+
+- Default / `--security` / `--all` query TXT at `_mta-sts.<domain>` (`v=STSv1; id=...`)
+- CLI/JSON/HTML show the id and the policy host `mta-sts.<domain>` (no HTTP GET)
+- Findings: `mtasts_missing` / `mtasts_unreadable` / `mtasts_id_missing` are info (+0); multiple TXT is low (+5)
+
+### Notes
+
+- This is not an SMTP or STARTTLS scanner
+- Missing MTA-STS is common and is not treated as a compromise
+
 ## 1.5.0 — 2026-09-07
 
 Opt-in SRV lookup (RFC 2782). Service names are never guessed.

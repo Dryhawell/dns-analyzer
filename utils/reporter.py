@@ -18,6 +18,7 @@ from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import DNSRecord
+from analyzer.mtasts import MtaStsObservation
 from analyzer.result import DNSAnalysisResult
 from analyzer.risk import RiskScore
 from analyzer.security import SecurityFinding, SecurityReport
@@ -60,6 +61,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "dnssec": _dnssec_dict(result.dnssec),
         "spf": _spf_dict(result.spf),
         "dmarc": _dmarc_dict(result.dmarc),
+        "mta_sts": _mta_sts_dict(result.mta_sts),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -202,6 +204,21 @@ def _dmarc_dict(observation: DmarcObservation | None) -> dict[str, object] | Non
     }
 
 
+def _mta_sts_dict(observation: MtaStsObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "policy_host": observation.policy_host,
+        "record": observation.record,
+        "id": observation.policy_id,
+        "multiple_records": observation.multiple_records,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -323,6 +340,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_spf(result.spf))
     if result.dmarc is not None:
         parts.extend(_html_dmarc(result.dmarc))
+    if result.mta_sts is not None:
+        parts.extend(_html_mta_sts(result.mta_sts))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -451,6 +470,23 @@ def _html_dmarc(observation: DmarcObservation) -> list[str]:
         parts.append(f"<p><code>{_e(observation.record)}</code></p>")
         if observation.policy:
             parts.append(f"<p>p={_e(observation.policy)} {_e(observation.policy_meaning)}</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_mta_sts(observation: MtaStsObservation) -> list[str]:
+    parts = [
+        "<h2>MTA-STS</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Policy host: <code>{_e(observation.policy_host)}</code> (HTTPS file not fetched)</p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.record:
+        parts.append(f"<p><code>{_e(observation.record)}</code></p>")
+        if observation.policy_id:
+            parts.append(f"<p>id={_e(observation.policy_id)}</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

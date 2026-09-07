@@ -13,6 +13,7 @@ from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
 from analyzer.dnssec import DnssecObservation
 from analyzer.models import CoreLookup
+from analyzer.mtasts import MtaStsObservation
 from analyzer.records import describe_ip_scope
 from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
@@ -50,7 +51,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS observations."""
 
     def analyze(
         self,
@@ -60,6 +61,7 @@ class SecurityAnalyzer:
         dmarc: DmarcObservation,
         dkim: Sequence[DkimObservation] = (),
         srv: Sequence[SrvObservation] = (),
+        mta_sts: MtaStsObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -67,6 +69,8 @@ class SecurityAnalyzer:
         findings.extend(self._dmarc(dmarc))
         findings.extend(self._dkim(dkim))
         findings.extend(self._srv(srv))
+        if mta_sts is not None:
+            findings.extend(self._mta_sts(mta_sts))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -362,6 +366,68 @@ class SecurityAnalyzer:
                         code="srv_missing",
                     )
                 )
+        return findings
+
+    def _mta_sts(self, observation: MtaStsObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="MTA-STS could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "policy, and it is not a compromise."
+                    ),
+                    recommendation="Retry the _mta-sts lookup before treating MTA-STS as unpublished.",
+                    code="mtasts_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="MTA-STS TXT not published",
+                    description=(
+                        f"No v=STSv1 record at {observation.query_name}. "
+                        "Receivers cannot discover an MTA-STS policy id here. "
+                        "This is common and is not proof that SMTP is unencrypted."
+                    ),
+                    recommendation=(
+                        "If you operate inbound mail, publish v=STSv1; id=... at "
+                        "_mta-sts and a HTTPS policy at mta-sts.<domain>. This tool "
+                        "does not fetch that file."
+                    ),
+                    code="mtasts_missing",
+                )
+            ]
+        findings: list[SecurityFinding] = []
+        if observation.multiple_records:
+            findings.append(
+                SecurityFinding(
+                    severity="low",
+                    title="Multiple MTA-STS TXT records",
+                    description=(
+                        "More than one v=STSv1 TXT was returned. Receivers may "
+                        "ignore the policy id."
+                    ),
+                    recommendation="Keep a single v=STSv1 record at _mta-sts.<domain>.",
+                    code="mtasts_multiple",
+                )
+            )
+        if not observation.policy_id:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="MTA-STS TXT has no id=",
+                    description=(
+                        "RFC 8461 requires an id= token so senders can notice "
+                        "HTTPS policy changes. Absence is a configuration signal, "
+                        "not a compromise."
+                    ),
+                    recommendation="Add id= to the v=STSv1 TXT and bump it when the policy file changes.",
+                    code="mtasts_id_missing",
+                )
+            )
         return findings
 
     def _caa(self, lookup: CoreLookup) -> list[SecurityFinding]:
