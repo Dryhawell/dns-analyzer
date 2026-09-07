@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.5.0 — 2026-09-07
+
+Opt-in SRV lookup (RFC 2782). Service names are never guessed.
+
+### Added
+
+- `--srv SERVICE` (repeatable, max 8) queries `_SERVICE._tcp.<domain>` (or `SERVICE/udp`)
+- CLI/JSON/HTML show priority, weight, port, and target; target `.` means the service is not offered
+- Findings only for services you named (`srv_missing` / `srv_unreadable` are info, +0)
+- `--record SRV` is rejected with a hint to use `--srv`
+
+### Notes
+
+- Default / `--all` / `--security` still do **not** hunt sip, xmpp, minecraft, or any other service
+- SRV is not at the apex; it is not part of `CORE_TYPES`
+
 ## 1.4.0 — 2026-09-07
 
 One-hop SPF `include:` / `redirect=` lookup. Not a full RFC 7208 evaluator.

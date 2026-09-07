@@ -15,6 +15,7 @@ from analyzer.dnssec import DnssecObservation
 from analyzer.models import DNSRecord
 from analyzer.security import SecurityReport
 from analyzer.spf import SpfObservation
+from analyzer.srv import SrvObservation
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class DNSAnalysisResult:
     spf: SpfObservation | None = None
     dmarc: DmarcObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
+    srv: tuple[SrvObservation, ...] | None = None
     security: SecurityReport | None = None
     ptr_query: str | None = None
     view_record_types: tuple[str, ...] | None = None

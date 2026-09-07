@@ -149,3 +149,28 @@ def test_https_from_dnspython_rdata() -> None:
     assert "alpn=" in text
     assert "h2" in text
     assert "port=443" in text
+
+
+def test_srv_value_is_priority_weight_port_target() -> None:
+    rdata = DummyRdata(
+        "unused",
+        priority=10,
+        weight=5,
+        port=5060,
+        target="sip.example.com.",
+    )
+    assert format_rdata("SRV", rdata) == "10 5 5060 sip.example.com"
+    row = records_from_answer("SRV", "_sip._tcp.Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    assert row.name == "_sip._tcp.example.com"
+    assert row.priority == 10
+    details = dict(row.details)
+    assert "lower number" in details["Priority"]
+    assert details["Port"] == "5060"
+    assert details["Target"] == "sip.example.com"
+
+
+def test_srv_dot_target_explains_not_offered() -> None:
+    rdata = DummyRdata("unused", priority=0, weight=0, port=0, target=".")
+    assert format_rdata("SRV", rdata) == "0 0 0 ."
+    row = records_from_answer("SRV", "_sip._tcp.example.com", SimpleAnswer(rdata))[0]
+    assert "not offered" in dict(row.details)["Note"]

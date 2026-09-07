@@ -49,6 +49,7 @@ from analyzer.reverse import looks_like_ip, parse_ip, ptr_name
 from analyzer.risk import RiskScore
 from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
+from analyzer.srv import SrvObservation, SrvSpecError, normalize_srv_specs
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
 from analyzer.version import __version__
@@ -75,6 +76,7 @@ Examples:
   python main.py example.com --record MX --record NS
   python main.py example.com --security
   python main.py example.com --dkim google
+  python main.py example.com --srv sip
   python main.py example.com --format json
   python main.py example.com --format html --output reports/example_com.html
   python main.py example.com --output reports/example_com.json
@@ -85,9 +87,10 @@ Examples:
 Default (no --record / --security) is the same as --all: every record
 type plus DNSSEC, SPF, DMARC, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
+--srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
-This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, or CAA
-is an observation, not proof of compromise.
+This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
+or SRV is an observation, not proof of compromise.
 """
 
 
@@ -154,7 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Show only this record type (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB). "
             "Repeatable. Other types are not queried. A is always queried first "
-            "so NXDOMAIN can abort. PTR is --reverse, not --record PTR."
+            "so NXDOMAIN can abort. PTR is --reverse, not --record PTR. "
+            "SRV is --srv, not --record SRV."
         ),
     )
     parser.add_argument(
@@ -170,6 +174,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Look up this DKIM selector (TXT at SELECTOR._domainkey.<domain>). "
             "Repeatable, max 8. Selectors are never guessed."
+        ),
+    )
+    parser.add_argument(
+        "--srv",
+        action="append",
+        dest="srv_services",
+        metavar="SERVICE",
+        help=(
+            "Look up this SRV service (_SERVICE._tcp.<domain>, or SERVICE/udp). "
+            "Repeatable, max 8. Service names are never guessed."
         ),
     )
     parser.add_argument(
@@ -232,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value == "PTR":
+    if value in {"PTR", "SRV"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -240,8 +254,11 @@ def _normalize_record_type(raw: str) -> str | None:
 
 
 def _record_type_error(raw: str) -> str:
-    if raw.strip().upper() == "PTR":
+    kind = raw.strip().upper()
+    if kind == "PTR":
         return "PTR is reverse DNS. Use --reverse <ip>."
+    if kind == "SRV":
+        return "SRV is not at the apex. Use --srv <service> (for example --srv sip)."
     allowed = ", ".join(_RECORD_ORDER)
     return f"Unknown record type {raw!r}. Use one of: {allowed}."
 
@@ -259,8 +276,13 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
     has_filter = bool(selected)
     if args.all and (has_filter or args.security):
         return "Do not combine --all with --record or --security. --all is the full report."
-    if args.reverse and (has_filter or args.security or args.all or args.dkim_selectors):
-        return "Use either a domain (with --record/--security/--all/--dkim) or --reverse, not both."
+    if args.reverse and (
+        has_filter or args.security or args.all or args.dkim_selectors or args.srv_services
+    ):
+        return (
+            "Use either a domain (with --record/--security/--all/--dkim/--srv) "
+            "or --reverse, not both."
+        )
 
     if args.all or (not has_filter and not args.security):
         return ReportView(record_types=None, show_security=True)
@@ -588,6 +610,7 @@ def _print_lookup(
     security: SecurityReport | None,
     view: ReportView,
     dkim: tuple[DkimObservation, ...] | None = None,
+    srv: tuple[SrvObservation, ...] | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -630,6 +653,9 @@ def _print_lookup(
     if dkim:
         for item in dkim:
             _print_dkim(item)
+    if srv:
+        for item in srv:
+            _print_srv(item)
     if view.show_security:
         if dnssec is None or spf is None or dmarc is None or security is None:
             raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC results.")
@@ -729,6 +755,25 @@ def _print_dkim(observation: DkimObservation) -> None:
     if observation.error:
         print(f"Note: {observation.error}")
     print()
+    print(observation.note)
+    print()
+
+
+def _print_srv(observation: SrvObservation) -> None:
+    print("SRV")
+    print("────────────────────────")
+    print(f"Service: {observation.service}/{observation.protocol}")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    for record in observation.records:
+        print(record.value)
+        for label, value in record.details:
+            print(f"{label}: {value}")
+        print(format_ttl_line(record.ttl))
+        print()
+    if observation.error:
+        print(f"Note: {observation.error}")
+        print()
     print(observation.note)
     print()
 
@@ -924,6 +969,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --record A")
     print("       python main.py <domain> --security")
     print("       python main.py <domain> --dkim google")
+    print("       python main.py <domain> --srv sip")
     print("       python main.py <domain> --format json")
     print("       python main.py <domain> --format html --output reports/example.html")
     print("       python main.py <domain> --output reports/example.json")
@@ -1011,6 +1057,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.nameservers
             or args.resolver_names
             or args.dkim_selectors
+            or args.srv_services
         )
         if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
@@ -1046,6 +1093,14 @@ def _run(argv: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    try:
+        srv_specs = normalize_srv_specs(args.srv_services) if args.srv_services else ()
+    except SrvSpecError as exc:
+        _configure_logging()
+        _log.error("Invalid SRV service")
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     _configure_logging()
     _log.info(
         "DNS analysis started target=%s mode=forward resolver=%s",
@@ -1072,9 +1127,10 @@ def _run(argv: list[str] | None = None) -> int:
     dmarc = None
     security = None
     dkim_observations = None
+    srv_observations = None
     try:
         if view.show_security:
-            workers = 2 + len(selectors)
+            workers = 2 + len(selectors) + len(srv_specs)
             with ThreadPoolExecutor(max_workers=min(8, max(2, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
@@ -1082,10 +1138,16 @@ def _run(argv: list[str] | None = None) -> int:
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
                 ]
+                fut_srv = [
+                    pool.submit(resolver.inspect_srv, domain, spec)
+                    for spec in srv_specs
+                ]
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
+                if srv_specs:
+                    srv_observations = tuple(item.result() for item in fut_srv)
             spf = inspect_spf(lookup.txt, lookup.errors)
             spf = resolver.expand_spf(spf)
             security = SecurityAnalyzer().analyze(
@@ -1094,19 +1156,33 @@ def _run(argv: list[str] | None = None) -> int:
                 spf,
                 dmarc,
                 dkim_observations or (),
+                srv_observations or (),
             )
-        elif selectors:
-            if len(selectors) >= 2:
-                with ThreadPoolExecutor(max_workers=min(8, len(selectors))) as pool:
-                    futures = [
+        elif selectors or srv_specs:
+            extra = len(selectors) + len(srv_specs)
+            if extra >= 2:
+                with ThreadPoolExecutor(max_workers=min(8, extra)) as pool:
+                    fut_dkim = [
                         pool.submit(resolver.inspect_dkim, domain, sel)
                         for sel in selectors
                     ]
-                    dkim_observations = tuple(item.result() for item in futures)
+                    fut_srv = [
+                        pool.submit(resolver.inspect_srv, domain, spec)
+                        for spec in srv_specs
+                    ]
+                    if selectors:
+                        dkim_observations = tuple(item.result() for item in fut_dkim)
+                    if srv_specs:
+                        srv_observations = tuple(item.result() for item in fut_srv)
             else:
-                dkim_observations = tuple(
-                    resolver.inspect_dkim(domain, sel) for sel in selectors
-                )
+                if selectors:
+                    dkim_observations = tuple(
+                        resolver.inspect_dkim(domain, sel) for sel in selectors
+                    )
+                if srv_specs:
+                    srv_observations = tuple(
+                        resolver.inspect_srv(domain, spec) for spec in srv_specs
+                    )
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
         _print_dns_failure(exc, domain)
@@ -1141,6 +1217,7 @@ def _run(argv: list[str] | None = None) -> int:
         spf=spf,
         dmarc=dmarc,
         dkim=dkim_observations,
+        srv=srv_observations,
         security=security,
         view_record_types=_view_record_types(view),
         view_security=view.show_security,
@@ -1158,7 +1235,16 @@ def _run(argv: list[str] | None = None) -> int:
             print("Resolver:")
             print(settings.primary.name)
             print()
-        _print_lookup(lookup, dnssec, spf, dmarc, security, view, dkim_observations)
+        _print_lookup(
+            lookup,
+            dnssec,
+            spf,
+            dmarc,
+            security,
+            view,
+            dkim_observations,
+            srv_observations,
+        )
         if comparison is not None:
             _print_comparison(comparison)
 

@@ -23,6 +23,7 @@ from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
+from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
 
 from analyzer.exceptions import (
     DNSNetworkError,
@@ -227,6 +228,20 @@ class DNSResolver:
         except DNSQueryError as exc:
             return evaluate_dkim(qname, selector, (), error=str(exc))
         return evaluate_dkim(qname, selector, records)
+
+    def inspect_srv(self, name: str, spec: SrvSpec) -> SrvObservation:
+        """SRV lookup at _service._proto.<name>. Does not guess services."""
+        qname = srv_query_name(name, spec)
+        try:
+            records = self.resolve_srv(qname)
+        except DomainNotFoundError:
+            return evaluate_srv(qname, spec, ())
+        except DNSQueryError as exc:
+            return evaluate_srv(qname, spec, (), error=str(exc))
+        return evaluate_srv(qname, spec, records)
+
+    def resolve_srv(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "SRV")
 
     def expand_spf(self, observation: SpfObservation) -> SpfObservation:
         """Look up include:/redirect= one hop. Nested include: is listed, not queried."""

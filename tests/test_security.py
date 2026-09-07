@@ -374,6 +374,51 @@ def test_dkim_missing_selector_is_info_and_unscored() -> None:
     assert report.risk.value == 0
 
 
+def test_srv_missing_is_info_and_unscored() -> None:
+    from analyzer.risk import WEIGHTS
+    from analyzer.srv import SrvSpec, evaluate_srv
+
+    observation = evaluate_srv("_sip._tcp.example.com", SrvSpec("sip", "tcp"), ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        (),
+        (observation,),
+    )
+    missing = next(item for item in report.findings if item.code == "srv_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["srv_missing"] == 0
+    assert report.risk.value == 0
+
+
+def test_srv_timeout_is_info_unreadable() -> None:
+    from analyzer.srv import SrvSpec, evaluate_srv
+
+    observation = evaluate_srv(
+        "_sip._tcp.example.com",
+        SrvSpec("sip", "tcp"),
+        (),
+        error="DNS query timed out.",
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        srv=(observation,),
+    )
+    unread = next(item for item in report.findings if item.code == "srv_unreadable")
+    assert unread.severity == "info"
+    assert not any(item.code == "srv_missing" for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

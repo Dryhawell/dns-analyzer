@@ -40,6 +40,8 @@ WEIGHTS: dict[str, int] = {
     "dkim_selector_missing": 0,
     "dkim_revoked": 8,
     "dkim_multiple": 5,
+    "srv_unreadable": 0,
+    "srv_missing": 0,
     "address_non_global": 22,
     "cname_dangling": 8,
     "txt_many": 1,

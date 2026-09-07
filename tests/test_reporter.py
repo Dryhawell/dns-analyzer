@@ -54,6 +54,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["dnssec"] is None
     assert payload["dmarc"] is None
     assert payload["dkim"] is None
+    assert payload["srv"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -183,3 +184,51 @@ def test_json_and_html_include_dkim() -> None:
     page = dumps_html(result)
     assert "google._domainkey.example.com" in page
     assert "FOUND" in page
+
+
+def test_json_and_html_include_srv() -> None:
+    from analyzer.srv import SrvSpec, evaluate_srv
+
+    observation = evaluate_srv(
+        "_sip._tcp.example.com",
+        SrvSpec("sip", "tcp"),
+        [
+            DNSRecord(
+                "SRV",
+                "_sip._tcp.example.com",
+                "10 5 5060 sip.example.com",
+                300,
+                priority=10,
+            )
+        ],
+    )
+    result = _result(srv=(observation,))
+    payload = result_to_dict(result)
+    assert payload["srv"][0]["service"] == "sip"
+    assert payload["srv"][0]["protocol"] == "tcp"
+    assert payload["srv"][0]["status"] == "FOUND"
+    assert payload["srv"][0]["records"][0]["value"] == "10 5 5060 sip.example.com"
+    page = dumps_html(result)
+    assert "_sip._tcp.example.com" in page
+    assert "sip.example.com" in page
+    xss = dumps_html(
+        _result(
+            srv=(
+                evaluate_srv(
+                    "_x._tcp.example.com",
+                    SrvSpec("x", "tcp"),
+                    [
+                        DNSRecord(
+                            "SRV",
+                            "_x._tcp.example.com",
+                            '<script>alert(1)</script>',
+                            60,
+                            priority=0,
+                        )
+                    ],
+                ),
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss

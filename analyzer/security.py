@@ -16,6 +16,7 @@ from analyzer.models import CoreLookup
 from analyzer.records import describe_ip_scope
 from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
+from analyzer.srv import SrvObservation
 
 DISCLAIMER = (
     "Findings are configuration observations, not vulnerability scanner results. "
@@ -58,12 +59,14 @@ class SecurityAnalyzer:
         spf: SpfObservation,
         dmarc: DmarcObservation,
         dkim: Sequence[DkimObservation] = (),
+        srv: Sequence[SrvObservation] = (),
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
         findings.extend(self._spf(spf))
         findings.extend(self._dmarc(dmarc))
         findings.extend(self._dkim(dkim))
+        findings.extend(self._srv(srv))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -319,6 +322,44 @@ class SecurityAnalyzer:
                         ),
                         recommendation="Keep one DKIM TXT RR per selector (strings may still split).",
                         code="dkim_multiple",
+                    )
+                )
+        return findings
+
+    def _srv(self, observations: Sequence[SrvObservation]) -> list[SecurityFinding]:
+        findings: list[SecurityFinding] = []
+        for item in observations:
+            label = f"{item.service}/{item.protocol}"
+            if item.error:
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"SRV {label} could not be read",
+                        description=(
+                            f"{item.error} A timeout is not the same as a missing "
+                            "service, and it is not a compromise."
+                        ),
+                        recommendation="Retry the lookup before treating this service as unpublished.",
+                        code="srv_unreadable",
+                    )
+                )
+                continue
+            if item.status == "NOT DETECTED":
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"SRV {label} not published",
+                        description=(
+                            f"No SRV record was found at {item.query_name}. "
+                            "The service may be unused, misspelled, or unpublished. "
+                            "This is not proof that the host offers nothing."
+                        ),
+                        recommendation=(
+                            "Confirm the service name from the application "
+                            "(for example sip, xmpp, minecraft). This tool does "
+                            "not guess SRV names."
+                        ),
+                        code="srv_missing",
                     )
                 )
         return findings

@@ -22,6 +22,7 @@ from analyzer.result import DNSAnalysisResult
 from analyzer.risk import RiskScore
 from analyzer.security import SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation
+from analyzer.srv import SrvObservation
 from analyzer.version import __version__
 
 SCHEMA = "dns-analyzer.report.v1"
@@ -60,6 +61,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "spf": _spf_dict(result.spf),
         "dmarc": _dmarc_dict(result.dmarc),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
+        "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -216,6 +218,18 @@ def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     }
 
 
+def _srv_dict(observation: SrvObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "service": observation.service,
+        "protocol": observation.protocol,
+        "query_name": observation.query_name,
+        "records": [record_to_dict(item) for item in observation.records],
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _security_dict(report: SecurityReport | None) -> dict[str, object] | None:
     if report is None:
         return None
@@ -312,6 +326,9 @@ def _html_document(result: DNSAnalysisResult) -> str:
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
+    if result.srv:
+        for item in result.srv:
+            parts.extend(_html_srv(item))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -453,6 +470,41 @@ def _html_dkim(observation: DkimObservation) -> list[str]:
         parts.append("<p>Public key: empty (p=) — this selector is revoked</p>")
     elif observation.key_present:
         parts.append(f"<p>Public key: present ({observation.key_chars} characters)</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_srv(observation: SrvObservation) -> list[str]:
+    parts = [
+        "<h2>SRV</h2>",
+        f"<p>Service: <code>{_e(observation.service)}/{_e(observation.protocol)}</code></p>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.records:
+        parts.extend(
+            [
+                "<table>",
+                "<thead><tr><th>Value</th><th>TTL</th><th>Priority</th></tr></thead>",
+                "<tbody>",
+            ]
+        )
+        for record in observation.records:
+            priority = "" if record.priority is None else str(record.priority)
+            parts.append(
+                "<tr>"
+                f"<td><code>{_e(record.value)}</code></td>"
+                f"<td>{record.ttl}</td>"
+                f"<td>{_e(priority)}</td>"
+                "</tr>"
+            )
+            for label, value in record.details:
+                parts.append(
+                    f"<tr><td colspan=\"3\">{_e(label)}: {_e(value)}</td></tr>"
+                )
+        parts.extend(["</tbody>", "</table>"])
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

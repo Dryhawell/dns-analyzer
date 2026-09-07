@@ -2,9 +2,9 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.4.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.5.0** — see [CHANGELOG.md](CHANGELOG.md).
 
-This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
+This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV) are observations, not automatic proof of compromise.
 
 ---
 
@@ -14,7 +14,7 @@ DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 
 1. Validates and normalizes the input
 2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB, PTR)
-3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, optional DKIM)
+3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, optional DKIM / SRV)
 4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
 Three layers:
@@ -52,7 +52,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - Controlled parallelism after A (dnspython `Resolver` is locked; it is not thread-safe)
 - TTL display (cache lifetime, never a security score)
 - DNSSEC **detection** (DNSKEY / DS / AD flag), not a full chain-of-trust validator
-- SPF and DMARC parsing from TXT; `include:` followed one hop; DKIM is opt-in (`--dkim`)
+- SPF and DMARC parsing from TXT; `include:` followed one hop; DKIM and SRV are opt-in
 - CAA inspection
 - HTTPS / SVCB (RFC 9460) — ALPN, port, ECH presence; not an HTTP scanner
 - Reverse DNS (`PTR`)
@@ -60,11 +60,12 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - Transparent risk score (local heuristic, 0–100; not CVSS)
 - JSON (`dns-analyzer.report.v1`), CSV, and self-contained HTML export
 - Optional DKIM selector lookup (`--dkim`; selectors are never guessed)
+- Optional SRV lookup (`--srv`; service names are never guessed)
 - Optional multi-resolver A/AAAA comparison from a JSON config (no hardcoded public DNS IPs)
 - File logging (`logs/dns-analyzer.log`; no secrets or rdata values)
 - Unit tests with mocks (no live nameservers)
 
-**Not in this release:** GUI, aggressive subdomain brute-force, WHOIS, geolocation, PDF reports, DKIM selector hunting.
+**Not in this release:** GUI, aggressive subdomain brute-force, WHOIS, geolocation, PDF reports, DKIM selector hunting, SRV service hunting.
 
 ---
 
@@ -97,9 +98,10 @@ It does **not** assign CVEs, does **not** prove a domain is compromised, and doe
 | **CAA** | Which certificate authorities may issue TLS certs | CAs may fall back to parent names; not automatically unsafe |
 | **HTTPS** | Service parameters for this name (ALPN, port, ECH) — DNS type 65, RFC 9460 | Common; browsers then use A/AAAA. Not a missing website |
 | **SVCB** | Generic service binding (same wire format as HTTPS) | Common; not a vulnerability |
+| **SRV** | Service location (`_service._proto`) — host, port, priority (RFC 2782) | Opt-in via `--srv`; never guessed. Missing is not a compromise |
 | **PTR** | IP → hostname (reverse DNS, under in-addr.arpa / ip6.arpa) | The address has no published reverse name |
 
-TTL is shown next to each record as a **cache lifetime**, never as a security score. MX **priority**: lower number is tried first.
+TTL is shown next to each record as a **cache lifetime**, never as a security score. MX and SRV **priority**: lower number is tried first.
 
 ### TTL, caching, and propagation
 
@@ -148,6 +150,7 @@ python main.py example.com --record MX --record NS
 python main.py example.com --record HTTPS
 python main.py example.com --security
 python main.py example.com --dkim google
+python main.py example.com --srv sip
 python main.py https://example.com/login
 python main.py example.com --timeout 3
 python main.py example.com --format json
@@ -166,6 +169,7 @@ python main.py --version
 | `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
 | `--security` | DNSSEC / SPF / DMARC / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB) |
 | `--dkim SELECTOR` | TXT at `SELECTOR._domainkey.<domain>`. Repeatable (max 8). Never guessed |
+| `--srv SERVICE` | SRV at `_SERVICE._tcp.<domain>` (or `SERVICE/udp`). Repeatable (max 8). Never guessed |
 | `--record A --security` | That type plus the security sections |
 | `--reverse IP` | PTR only |
 | `--format json` / `csv` / `html` | Machine or HTML stdout (no human dump) |
@@ -173,7 +177,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.4.0` and exit |
+| `--version` | Print `dns-analyzer 1.5.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -185,7 +189,7 @@ python main.py --version
 
 The program does not print a traceback for expected DNS or CLI errors. Unexpected failures log a traceback to the log file and print one line on stderr.
 
-Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, **CAA**, **HTTPS**, and **SVCB**. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
+Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, **CAA**, **HTTPS**, and **SVCB**. **SRV** is opt-in (`--srv`) and is not queried at the apex. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
 
 `--record A` **queries only A**. `--record MX` still queries **A first** (existence); JSON/CSV therefore include that A plus MX — collected data, not a hidden full-zone dump.
 
@@ -229,6 +233,13 @@ One DKIM selector (from a mail header, not guessed):
 
 ```bash
 python main.py example.com --dkim google
+```
+
+One SRV service (name from the application, not guessed):
+
+```bash
+python main.py example.com --srv sip
+python main.py example.com --srv sip/udp
 ```
 
 JSON on stdout (pipe-friendly; no “DNS ANALYZER” banner):
@@ -278,7 +289,7 @@ JSON and CSV are for other programs, not for humans scraping the terminal. HTML 
 
 HTML uses inline CSS only: no JavaScript, no CDN. Record values are escaped (`&lt;script&gt;`) so a TXT string cannot inject markup.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `dkim` (only when `--dkim` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
+JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, including extra resolvers when comparison is on, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
@@ -329,7 +340,7 @@ Examples from the current weights:
 - Missing CAA: **+2**
 - TXT timeout: **+0** (unread is not treated as missing)
 
-A clean published set (DNSSEC visible, SPF `-all`, DMARC `p=reject`, CAA present, public A) scores **0**. Resolver comparison never adds points. A DKIM selector you asked for and that is missing scores **+0** (wrong selector is common). An empty `p=` (revoked key) scores **+8**.
+A clean published set (DNSSEC visible, SPF `-all`, DMARC `p=reject`, CAA present, public A) scores **0**. Resolver comparison never adds points. A DKIM selector or SRV service you asked for and that is missing scores **+0**. An empty DKIM `p=` (revoked key) scores **+8**.
 
 ---
 
@@ -377,6 +388,18 @@ Missing DMARC is an observation, not an automatic critical vulnerability. Multip
 
 ---
 
+## SRV
+
+**SRV** (RFC 2782) maps a **service name** to a host and port. The record lives at `_service._proto.<domain>`, not at the apex. This tool looks up services only when you pass `--srv SERVICE`. It does **not** brute-force `sip`, `xmpp`, `minecraft`, or any other list.
+
+```bash
+python main.py example.com --srv sip --srv xmpp/tcp
+```
+
+Default protocol is **tcp**. Use `sip/udp` for UDP. `FOUND` lists priority (lowest first), weight, port, and target. Target `.` means this service is not offered at this name. NXDOMAIN / empty is **NOT DETECTED** for that service only. Timeout is unread, not “SRV missing”. `--record SRV` is rejected; use `--srv`.
+
+---
+
 ## CAA
 
 **CAA** (Certification Authority Authorization) says which CAs may issue certificates for the name (`issue` / `issuewild` / `iodef`).
@@ -411,7 +434,7 @@ dns-analyzer/
 │   ├── models.py                # DNSRecord, CoreLookup
 │   ├── reverse.py               # IP → PTR name
 │   ├── ttl.py                   # cache-lifetime wording
-│   ├── dnssec.py / spf.py / dmarc.py / dkim.py
+│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py
 │   ├── security.py / risk.py
 │   ├── config.py / compare.py   # named resolvers, A/AAAA diff
 │   └── result.py                # one run, ready to export
@@ -433,7 +456,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -447,6 +470,7 @@ If a test needs the network, it does not belong in this suite.
 - DNSSEC here is **visibility to this resolver**, not validation to the IANA root
 - SPF `include:` / `redirect=` are followed one hop; nested include: and a/mx/ptr/exists are not evaluated
 - DKIM selectors are **opt-in** (`--dkim`); they are never brute-forced or guessed
+- SRV services are **opt-in** (`--srv`); they are never brute-forced or guessed
 - Documentation addresses (`192.0.2.0/24`, `2001:db8::/32`, …) are labeled, not scored as private LAN
 - The risk score is a local heuristic, not a security standard
 - Different answers from two resolvers are not proof of hijacking
@@ -463,7 +487,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.4.0** adds one-hop SPF include lookup. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.5.0** adds opt-in SRV lookup. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

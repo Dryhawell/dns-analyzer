@@ -83,6 +83,7 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
         "example.com", types=None
     )
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
+    mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     output = capsys.readouterr().out
     assert "Target:" in output
     assert "example.com" in output
@@ -409,6 +410,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
     mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
+    mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A",)
     )
@@ -502,6 +504,13 @@ def test_cli_record_ptr_hints_reverse(capsys) -> None:
     assert "--reverse" in capsys.readouterr().err
 
 
+def test_cli_record_srv_hints_srv_flag(capsys) -> None:
+    assert run(["example.com", "--record", "SRV"]) == 1
+    err = capsys.readouterr().err
+    assert "--srv" in err
+    assert "apex" in err.lower() or "not at the apex" in err.lower()
+
+
 def test_cli_rejects_all_with_record(capsys) -> None:
     assert run(["example.com", "--all", "--record", "A"]) == 1
     assert "Do not combine --all" in capsys.readouterr().err
@@ -514,6 +523,11 @@ def test_cli_rejects_reverse_with_security(capsys) -> None:
 
 def test_cli_rejects_reverse_with_dkim(capsys) -> None:
     assert run(["--reverse", "8.8.8.8", "--dkim", "google"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
+def test_cli_rejects_reverse_with_srv(capsys) -> None:
+    assert run(["--reverse", "8.8.8.8", "--srv", "sip"]) == 1
     assert "--reverse" in capsys.readouterr().err
 
 
@@ -570,11 +584,88 @@ def test_cli_dkim_json_includes_observation(mock_resolver_cls, capsys) -> None:
     assert data["dkim"][0]["status"] == "FOUND"
 
 
+@patch("cli.interface.DNSResolver")
+def test_cli_srv_prints_section(mock_resolver_cls, capsys) -> None:
+    from analyzer.srv import SrvSpec, evaluate_srv
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_srv.return_value = evaluate_srv(
+        "_sip._tcp.example.com",
+        SrvSpec("sip", "tcp"),
+        [
+            DNSRecord(
+                "SRV",
+                "_sip._tcp.example.com",
+                "10 5 5060 sip.example.com",
+                300,
+                priority=10,
+                details=(
+                    ("Priority", "10 — lower number is tried first"),
+                    ("Weight", "5 — among the same priority"),
+                    ("Port", "5060"),
+                    ("Target", "sip.example.com"),
+                ),
+            )
+        ],
+    )
+
+    assert run(["example.com", "--record", "A", "--srv", "sip"]) == 0
+    output = capsys.readouterr().out
+    assert "SRV" in output
+    assert "_sip._tcp.example.com" in output
+    assert "FOUND" in output
+    assert "5060" in output
+    assert "SECURITY ANALYSIS" not in output
+    mock_resolver_cls.return_value.inspect_srv.assert_called_once()
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    called_spec = mock_resolver_cls.return_value.inspect_srv.call_args[0][1]
+    assert called_spec.service == "sip"
+    assert called_spec.protocol == "tcp"
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_srv_json_includes_observation(mock_resolver_cls, capsys) -> None:
+    from analyzer.srv import SrvSpec, evaluate_srv
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_srv.return_value = evaluate_srv(
+        "_sip._udp.example.com",
+        SrvSpec("sip", "udp"),
+        [
+            DNSRecord(
+                "SRV",
+                "_sip._udp.example.com",
+                "0 0 5060 sip.example.com",
+                60,
+                priority=0,
+            )
+        ],
+    )
+
+    assert run(["example.com", "--srv", "sip/udp", "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["srv"][0]["service"] == "sip"
+    assert data["srv"][0]["protocol"] == "udp"
+    assert data["srv"][0]["status"] == "FOUND"
+
+
+def test_cli_rejects_invalid_srv_service(capsys) -> None:
+    assert run(["example.com", "--srv", "*.sip"]) == 1
+    assert "Invalid SRV service" in capsys.readouterr().err
+
+
 def test_cli_help_lists_modes() -> None:
     help_text = build_parser().format_help()
     assert "--record" in help_text
     assert "--security" in help_text
     assert "--dkim" in help_text
+    assert "--srv" in help_text
     assert "--all" in help_text
     assert "--reverse" in help_text
     assert "--format" in help_text
@@ -616,6 +707,8 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["records"][0]["value"] == "93.184.216.34"
     assert data["risk_score"]["band"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
     assert data["security_analysis"]["findings"]
+    assert data["dkim"] is None
+    assert data["srv"] is None
 
 
 @patch("cli.interface.DNSResolver")

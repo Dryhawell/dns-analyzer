@@ -19,6 +19,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
     if rtype == "MX":
         return _text(getattr(rdata, "exchange", rdata))
 
+    if rtype == "SRV":
+        return _format_srv(rdata)
+
     if rtype == "TXT":
         strings = getattr(rdata, "strings", None)
         if strings is None:
@@ -86,6 +89,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
             ("Expire", str(getattr(rdata, "expire", ""))),
             ("Minimum", str(getattr(rdata, "minimum", ""))),
         )
+    if rtype == "SRV":
+        return _srv_details(rdata)
     if rtype == "CAA":
         tag = getattr(rdata, "tag", "")
         if isinstance(tag, bytes):
@@ -110,12 +115,33 @@ def _mx_priority(record_type: str, rdata: object) -> int | None:
         if preference is None:
             return None
         return int(preference)
-    if rtype in {"HTTPS", "SVCB"}:
+    if rtype in {"HTTPS", "SVCB", "SRV"}:
         priority = getattr(rdata, "priority", None)
         if priority is None:
             return None
         return int(priority)
     return None
+
+
+def _format_srv(rdata: object) -> str:
+    priority = getattr(rdata, "priority", "")
+    weight = getattr(rdata, "weight", "")
+    port = getattr(rdata, "port", "")
+    target = _text(getattr(rdata, "target", "")) or "."
+    return f"{priority} {weight} {port} {target}"
+
+
+def _srv_details(rdata: object) -> tuple[tuple[str, str], ...]:
+    target = _text(getattr(rdata, "target", "")) or "."
+    rows: list[tuple[str, str]] = [
+        ("Priority", f"{getattr(rdata, 'priority', '')} — lower number is tried first"),
+        ("Weight", f"{getattr(rdata, 'weight', '')} — among the same priority"),
+        ("Port", str(getattr(rdata, "port", ""))),
+        ("Target", target),
+    ]
+    if target == ".":
+        rows.append(("Note", "Target '.' means this service is not offered (RFC 2782)."))
+    return tuple(rows)
 
 
 def _format_svcb(rdata: object) -> str:
