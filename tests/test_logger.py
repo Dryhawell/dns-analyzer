@@ -29,6 +29,7 @@ def _bind_lookup(mock_cls) -> None:
     mock_cls.return_value.inspect_dmarc.return_value = evaluate_dmarc(
         "_dmarc.example.com", ()
     )
+    mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
 def test_configure_logging_writes_info_to_file(tmp_path: Path) -> None:

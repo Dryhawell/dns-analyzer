@@ -22,6 +22,7 @@ import dns.resolver
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
+from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 
 from analyzer.exceptions import (
     DNSNetworkError,
@@ -226,6 +227,18 @@ class DNSResolver:
         except DNSQueryError as exc:
             return evaluate_dkim(qname, selector, (), error=str(exc))
         return evaluate_dkim(qname, selector, records)
+
+    def expand_spf(self, observation: SpfObservation) -> SpfObservation:
+        """Look up include:/redirect= one hop. Nested include: is listed, not queried."""
+        return apply_spf_hops(observation, self._fetch_spf_txt)
+
+    def _fetch_spf_txt(self, name: str) -> tuple[tuple[DNSRecord, ...], str | None]:
+        try:
+            return tuple(self.resolve_txt(name)), None
+        except DomainNotFoundError:
+            return (), None
+        except DNSQueryError as exc:
+            return (), str(exc)
 
     def inspect_dnssec(self, name: str) -> DnssecObservation:
         """Look for DNSKEY/DS and the AD flag. Failures become observations."""

@@ -372,3 +372,66 @@ def test_dkim_missing_selector_is_info_and_unscored() -> None:
     assert missing.severity == "info"
     assert WEIGHTS["dkim_selector_missing"] == 0
     assert report.risk.value == 0
+
+
+def test_spf_include_timeout_is_info_not_missing_apex() -> None:
+    from analyzer.spf import SpfHop, inspect_spf
+
+    spf = inspect_spf(_clean_lookup().txt)
+    spf = replace_hops(
+        spf,
+        SpfHop(
+            kind="include",
+            domain="_spf.example.net",
+            status="NOT DETECTED",
+            policy=None,
+            all_term=None,
+            all_meaning=None,
+            error="DNS query timed out.",
+        ),
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        spf,
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+    )
+    unread = next(item for item in report.findings if item.code == "spf_include_unreadable")
+    assert unread.severity == "info"
+    assert not any(item.code == "spf_missing" for item in report.findings)
+
+
+def test_spf_include_missing_is_low_not_high() -> None:
+    from analyzer.spf import SpfHop, inspect_spf
+
+    spf = inspect_spf(_clean_lookup().txt)
+    spf = replace_hops(
+        spf,
+        SpfHop(
+            kind="include",
+            domain="missing.example.net",
+            status="NOT DETECTED",
+            policy=None,
+            all_term=None,
+            all_meaning=None,
+        ),
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        spf,
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+    )
+    missing = next(item for item in report.findings if item.code == "spf_include_missing")
+    assert missing.severity == "low"
+    assert report.highest_severity == "low"
+
+
+def replace_hops(spf, *hops):
+    from dataclasses import replace
+
+    return replace(spf, hops=hops)

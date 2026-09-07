@@ -166,6 +166,19 @@ def _spf_dict(observation: SpfObservation | None) -> dict[str, object] | None:
         "multiple_records": observation.multiple_records,
         "note": observation.note,
         "error": observation.error,
+        "hops": [
+            {
+                "kind": hop.kind,
+                "domain": hop.domain,
+                "status": hop.status,
+                "policy": hop.policy,
+                "all_term": hop.all_term,
+                "all_meaning": hop.all_meaning,
+                "nested_includes": list(hop.nested_includes),
+                "error": hop.error,
+            }
+            for hop in observation.hops
+        ],
     }
 
 
@@ -390,6 +403,21 @@ def _html_spf(observation: SpfObservation) -> list[str]:
             parts.append(
                 f"<p>all: {_e(observation.all_term)} — {_e(observation.all_meaning)}</p>"
             )
+        if observation.hops:
+            parts.append("<p>Includes (one hop; not a full SPF evaluation)</p><ul>")
+            for hop in observation.hops:
+                if hop.policy:
+                    parts.append(
+                        f"<li>{_e(hop.kind)} <code>{_e(hop.domain)}</code>: "
+                        f"<code>{_e(hop.policy)}</code></li>"
+                    )
+                else:
+                    extra = f" — {_e(hop.error)}" if hop.error else ""
+                    parts.append(
+                        f"<li>{_e(hop.kind)} <code>{_e(hop.domain)}</code>: "
+                        f"{_e(hop.status)}{extra}</li>"
+                    )
+            parts.append("</ul>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

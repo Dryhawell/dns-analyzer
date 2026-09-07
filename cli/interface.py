@@ -664,6 +664,20 @@ def _print_spf(observation: SpfObservation) -> None:
             print(f"all: {observation.all_term} ({observation.all_meaning})")
         if observation.multiple_records:
             print("Note: multiple v=spf1 TXT records (RFC 7208 expects one).")
+        if observation.hops:
+            print("Includes (one hop; not a full SPF evaluation):")
+            for hop in observation.hops:
+                label = hop.kind
+                if hop.status == "FOUND" and hop.policy:
+                    print(f"  {label} {hop.domain}: {hop.policy}")
+                    if hop.all_term:
+                        print(f"    all: {hop.all_term} ({hop.all_meaning})")
+                    if hop.nested_includes:
+                        shown = ", ".join(hop.nested_includes)
+                        print(f"    nested include: {shown} (not followed)")
+                else:
+                    extra = f" ({hop.error})" if hop.error else ""
+                    print(f"  {label} {hop.domain}: {hop.status}{extra}")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1073,6 +1087,7 @@ def _run(argv: list[str] | None = None) -> int:
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
             spf = inspect_spf(lookup.txt, lookup.errors)
+            spf = resolver.expand_spf(spf)
             security = SecurityAnalyzer().analyze(
                 lookup,
                 dnssec,

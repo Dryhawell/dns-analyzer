@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.3.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.4.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA) are observations, not automatic proof of compromise.
 
@@ -52,7 +52,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - Controlled parallelism after A (dnspython `Resolver` is locked; it is not thread-safe)
 - TTL display (cache lifetime, never a security score)
 - DNSSEC **detection** (DNSKEY / DS / AD flag), not a full chain-of-trust validator
-- SPF and DMARC parsing from TXT; DKIM is explained, not auto-discovered
+- SPF and DMARC parsing from TXT; `include:` followed one hop; DKIM is opt-in (`--dkim`)
 - CAA inspection
 - HTTPS / SVCB (RFC 9460) — ALPN, port, ECH presence; not an HTTP scanner
 - Reverse DNS (`PTR`)
@@ -173,7 +173,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.3.0` and exit |
+| `--version` | Print `dns-analyzer 1.4.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -357,7 +357,7 @@ These are **email authentication** signals in DNS. They do not encrypt mail. Abs
 - `~all` — softfail (often still delivered, sometimes marked)
 - `+all` — pass everyone (unusual)
 
-RFC 7208 expects **one** `v=spf1` record at the name. This tool does not follow `include:` chains.
+RFC 7208 expects **one** `v=spf1` record at the name. `include:` and `redirect=` are followed **one hop** (at most 10 names). Nested `include:` is listed, not queried. `a`, `mx`, `ptr`, and `exists` are not evaluated. This is not a full SPF check for a sending IP.
 
 **DKIM** (DomainKeys Identified Mail) uses a TXT record at a **selector** name, for example `google._domainkey.example.com`. The selector is chosen by the sender (see the `s=` tag in a `DKIM-Signature` mail header). This tool looks up selectors only when you pass `--dkim SELECTOR`. It does **not** brute-force `google`, `s1`, `default`, or any other list.
 
@@ -445,7 +445,7 @@ If a test needs the network, it does not belong in this suite.
 - Absence of DNSSEC / SPF / DMARC / CAA is a signal, not automatic critical risk
 - Missing HTTPS/SVCB is common and is not scored
 - DNSSEC here is **visibility to this resolver**, not validation to the IANA root
-- SPF `include:` chains are not followed
+- SPF `include:` / `redirect=` are followed one hop; nested include: and a/mx/ptr/exists are not evaluated
 - DKIM selectors are **opt-in** (`--dkim`); they are never brute-forced or guessed
 - Documentation addresses (`192.0.2.0/24`, `2001:db8::/32`, …) are labeled, not scored as private LAN
 - The risk score is a local heuristic, not a security standard
@@ -463,7 +463,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.3.0** adds HTTPS/SVCB records. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.4.0** adds one-hop SPF include lookup. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

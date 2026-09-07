@@ -15,7 +15,7 @@ from analyzer.dnssec import DnssecObservation
 from analyzer.models import CoreLookup
 from analyzer.records import describe_ip_scope
 from analyzer.risk import RiskScore, score_risk
-from analyzer.spf import SpfObservation
+from analyzer.spf import SpfHop, SpfObservation
 
 DISCLAIMER = (
     "Findings are configuration observations, not vulnerability scanner results. "
@@ -156,7 +156,41 @@ class SecurityAnalyzer:
                     code="spf_plus_all",
                 )
             )
+        for hop in spf.hops:
+            findings.extend(self._spf_hop(hop))
         return findings
+
+    def _spf_hop(self, hop: SpfHop) -> list[SecurityFinding]:
+        if hop.error:
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title=f"SPF {hop.kind} {hop.domain} could not be read",
+                    description=(
+                        f"{hop.error} A timeout on an include: target is not the same "
+                        "as a missing apex SPF record, and it is not a compromise."
+                    ),
+                    recommendation="Retry the include lookup before treating the chain as broken.",
+                    code="spf_include_unreadable",
+                )
+            ]
+        if hop.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="low",
+                    title=f"SPF {hop.kind} {hop.domain} has no v=spf1 record",
+                    description=(
+                        "RFC 7208 treats a void include: as a permanent SPF error. "
+                        "This is a policy-chain signal, not proof of compromise."
+                    ),
+                    recommendation=(
+                        "Publish v=spf1 at the include: name, or remove the include: "
+                        "from the apex policy."
+                    ),
+                    code="spf_include_missing",
+                )
+            ]
+        return []
 
     def _dmarc(self, dmarc: DmarcObservation) -> list[SecurityFinding]:
         findings: list[SecurityFinding] = []

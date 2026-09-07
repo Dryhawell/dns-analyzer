@@ -29,6 +29,8 @@ WEIGHTS: dict[str, int] = {
     "spf_missing": 8,
     "spf_multiple": 16,
     "spf_plus_all": 22,
+    "spf_include_unreadable": 0,
+    "spf_include_missing": 8,
     "dmarc_unreadable": 0,
     "dmarc_missing": 10,
     "dmarc_multiple": 16,

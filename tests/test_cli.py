@@ -65,6 +65,7 @@ def _bind(mock_cls, lookup: CoreLookup, dnssec=None, dmarc=None) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
     mock_cls.return_value.inspect_dmarc.return_value = dmarc or _dmarc()
+    mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
 @patch("cli.interface.DNSResolver")
@@ -311,6 +312,45 @@ def test_cli_prints_dmarc_reject(mock_resolver_cls, capsys) -> None:
     assert "p=reject" in output
     assert "_dmarc.example.com" in output
     assert "does not mean the domain is compromised" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
+    from dataclasses import replace
+
+    from analyzer.spf import SpfHop, inspect_spf
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(
+            a=[DNSRecord("A", "example.com", "93.184.216.34", 60)],
+            txt=[DNSRecord("TXT", "example.com", "v=spf1 include:_spf.google.com ~all", 300)],
+        ),
+    )
+    base = inspect_spf(
+        [DNSRecord("TXT", "example.com", "v=spf1 include:_spf.google.com ~all", 300)]
+    )
+    mock_resolver_cls.return_value.expand_spf.side_effect = None
+    mock_resolver_cls.return_value.expand_spf.return_value = replace(
+        base,
+        hops=(
+            SpfHop(
+                kind="include",
+                domain="_spf.google.com",
+                status="FOUND",
+                policy="v=spf1 include:_netblocks.google.com ~all",
+                all_term="~all",
+                all_meaning="softfail — often accepted but marked as suspicious",
+                nested_includes=("_netblocks.google.com",),
+            ),
+        ),
+    )
+
+    assert run(["example.com", "--security"]) == 0
+    output = capsys.readouterr().out
+    assert "include _spf.google.com:" in output
+    assert "nested include: _netblocks.google.com (not followed)" in output
+    mock_resolver_cls.return_value.expand_spf.assert_called()
 
 
 @patch("cli.interface.DNSResolver")

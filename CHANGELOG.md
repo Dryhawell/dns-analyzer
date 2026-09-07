@@ -2,6 +2,21 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.4.0 — 2026-09-07
+
+One-hop SPF `include:` / `redirect=` lookup. Not a full RFC 7208 evaluator.
+
+### Added
+
+- After the apex `v=spf1` record is found, `include:` and `redirect=` names are queried (max 10)
+- Nested `include:` names are listed and **not** followed; `a` / `mx` / `ptr` / `exists` are not evaluated
+- Void include: is a low finding (`spf_include_missing`); include timeout is info (`spf_include_unreadable`, +0)
+
+### Notes
+
+- This does not compute an SPF pass/fail for a sending IP
+- Apex `+all` is still scored from the apex policy only
+
 ## 1.3.0 — 2026-09-06
 
 HTTPS and SVCB records (RFC 9460). These are DNS types, not an HTTP scan.
