@@ -2,6 +2,23 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.9.0 — 2026-09-08
+
+DANE TLSA DNS discovery (RFC 6698). TLS is not probed.
+
+### Added
+
+- Default / `--security` / `--all` query TLSA at `_443._tcp.<domain>` (HTTPS DANE)
+- CLI/JSON/HTML show usage / selector / matching type and association hex (long values truncated)
+- Findings: `tlsa_missing` / `tlsa_unreadable` are info (+0)
+
+### Notes
+
+- Only 443/tcp is queried; MX hosts and other ports are not followed
+- This is a DNS record, not a TLS handshake or certificate check
+- Missing TLSA is common and is not treated as a compromise
+- `--record TLSA` is rejected (TLSA is not at the apex)
+
 ## 1.8.0 — 2026-09-08
 
 BIMI DNS discovery (RFC 9091). Logo and VMC URLs are not fetched.

@@ -5,6 +5,12 @@ from __future__ import annotations
 import ipaddress
 
 from analyzer.models import DNSRecord
+from analyzer.tlsa import (
+    association_hex,
+    matching_meaning,
+    selector_meaning,
+    usage_meaning,
+)
 
 
 def format_rdata(record_type: str, rdata: object) -> str:
@@ -51,6 +57,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
 
     if rtype in {"HTTPS", "SVCB"}:
         return _format_svcb(rdata)
+
+    if rtype == "TLSA":
+        return _format_tlsa(rdata)
 
     if rtype in {"A", "AAAA"}:
         return canonicalize_ip(_text(rdata))
@@ -105,6 +114,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         return ()
     if rtype in {"HTTPS", "SVCB"}:
         return _svcb_details(rdata)
+    if rtype == "TLSA":
+        return _tlsa_details(rdata)
     return ()
 
 
@@ -121,6 +132,30 @@ def _mx_priority(record_type: str, rdata: object) -> int | None:
             return None
         return int(priority)
     return None
+
+
+def _format_tlsa(rdata: object) -> str:
+    usage = int(getattr(rdata, "usage", 0))
+    selector = int(getattr(rdata, "selector", 0))
+    matching_type = int(getattr(rdata, "mtype", 0))
+    assoc, _truncated = association_hex(getattr(rdata, "cert", b""))
+    return f"{usage} {selector} {matching_type} {assoc}"
+
+
+def _tlsa_details(rdata: object) -> tuple[tuple[str, str], ...]:
+    usage = int(getattr(rdata, "usage", -1))
+    selector = int(getattr(rdata, "selector", -1))
+    matching_type = int(getattr(rdata, "mtype", -1))
+    assoc, truncated = association_hex(getattr(rdata, "cert", b""))
+    rows: list[tuple[str, str]] = [
+        ("Usage", f"{usage} — {usage_meaning(usage)}"),
+        ("Selector", f"{selector} — {selector_meaning(selector)}"),
+        ("Matching", f"{matching_type} — {matching_meaning(matching_type)}"),
+        ("Association", assoc),
+    ]
+    if truncated:
+        rows.append(("Truncated", "yes"))
+    return tuple(rows)
 
 
 def _format_srv(rdata: object) -> str:

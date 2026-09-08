@@ -564,6 +564,59 @@ def test_bimi_found_without_enforcing_dmarc_is_info() -> None:
     assert WEIGHTS["bimi_without_enforcing_dmarc"] == 0
 
 
+def test_tlsa_missing_is_info_and_unscored() -> None:
+    from analyzer.risk import WEIGHTS
+    from analyzer.tlsa import evaluate_tlsa
+
+    observation = evaluate_tlsa("_443._tcp.example.com", ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        tlsa=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "tlsa_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["tlsa_missing"] == 0
+    assert report.risk.value == 0
+
+
+def test_tlsa_found_adds_no_points() -> None:
+    from analyzer.tlsa import evaluate_tlsa
+
+    observation = evaluate_tlsa(
+        "_443._tcp.example.com",
+        [
+            DNSRecord(
+                "TLSA",
+                "_443._tcp.example.com",
+                "3 1 1 " + "ab" * 32,
+                300,
+                details=(
+                    ("Usage", "3 — DANE-EE"),
+                    ("Selector", "1 — SPKI"),
+                    ("Matching", "1 — SHA-256"),
+                    ("Association", "ab" * 32),
+                ),
+            )
+        ],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        tlsa=observation,
+    )
+    assert not any(item.code.startswith("tlsa_") for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

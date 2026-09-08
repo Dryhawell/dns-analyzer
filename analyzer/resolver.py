@@ -31,6 +31,7 @@ from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts, mta_sts_policy_host, mta_sts_query_name
 from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
+from analyzer.tlsa import TlsaObservation, evaluate_tlsa, tlsa_query_name
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt, tls_rpt_query_name
 
 from analyzer.exceptions import (
@@ -259,6 +260,20 @@ class DNSResolver:
         except DNSQueryError as exc:
             return evaluate_bimi(qname, DEFAULT_SELECTOR, (), error=str(exc))
         return evaluate_bimi(qname, DEFAULT_SELECTOR, records)
+
+    def inspect_tlsa(self, name: str) -> TlsaObservation:
+        """TLSA lookup at _443._tcp.<name>. Does not open TLS or follow MX."""
+        qname = tlsa_query_name(name)
+        try:
+            records = self.resolve_tlsa(qname)
+        except DomainNotFoundError:
+            return evaluate_tlsa(qname, ())
+        except DNSQueryError as exc:
+            return evaluate_tlsa(qname, (), error=str(exc))
+        return evaluate_tlsa(qname, records)
+
+    def resolve_tlsa(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "TLSA")
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

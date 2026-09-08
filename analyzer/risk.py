@@ -55,6 +55,8 @@ WEIGHTS: dict[str, int] = {
     "bimi_multiple": 5,
     "bimi_location_missing": 0,
     "bimi_without_enforcing_dmarc": 0,
+    "tlsa_unreadable": 0,
+    "tlsa_missing": 0,
     "address_non_global": 22,
     "cname_dangling": 8,
     "txt_many": 1,

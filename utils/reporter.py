@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from analyzer.bimi import BimiObservation
+from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
@@ -66,6 +67,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "mta_sts": _mta_sts_dict(result.mta_sts),
         "tls_rpt": _tls_rpt_dict(result.tls_rpt),
         "bimi": _bimi_dict(result.bimi),
+        "tlsa": _tlsa_dict(result.tlsa),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -253,6 +255,33 @@ def _bimi_dict(observation: BimiObservation | None) -> dict[str, object] | None:
     }
 
 
+def _tlsa_association_dict(item: TlsaAssociation) -> dict[str, object]:
+    return {
+        "usage": item.usage,
+        "selector": item.selector,
+        "matching_type": item.matching_type,
+        "association": item.association,
+        "association_truncated": item.association_truncated,
+        "usage_meaning": item.usage_meaning,
+        "selector_meaning": item.selector_meaning,
+        "matching_meaning": item.matching_meaning,
+    }
+
+
+def _tlsa_dict(observation: TlsaObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "port": observation.port,
+        "protocol": observation.protocol,
+        "records": [_tlsa_association_dict(item) for item in observation.associations],
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -380,6 +409,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_tls_rpt(result.tls_rpt))
     if result.bimi is not None:
         parts.extend(_html_bimi(result.bimi))
+    if result.tlsa is not None:
+        parts.extend(_html_tlsa(result.tlsa))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -560,6 +591,29 @@ def _html_bimi(observation: BimiObservation) -> list[str]:
             parts.append(f"<p>l={_e(observation.location)} (URL not fetched)</p>")
         if observation.authority:
             parts.append(f"<p>a={_e(observation.authority)} (URL not fetched)</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_tlsa(observation: TlsaObservation) -> list[str]:
+    parts = [
+        "<h2>DANE / TLSA</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Port/protocol: {observation.port}/{_e(observation.protocol)} (HTTPS)</p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    for item in observation.associations:
+        parts.append(
+            f"<p><code>{item.usage} {item.selector} {item.matching_type} "
+            f"{_e(item.association)}</code></p>"
+        )
+        parts.append(f"<p>usage: {_e(item.usage_meaning)}</p>")
+        parts.append(f"<p>selector: {_e(item.selector_meaning)}</p>")
+        parts.append(f"<p>matching: {_e(item.matching_meaning)}</p>")
+        if item.association_truncated:
+            parts.append("<p class=\"note\">association hex truncated (full certificate not dumped)</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

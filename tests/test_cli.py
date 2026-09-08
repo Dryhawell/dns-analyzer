@@ -11,6 +11,7 @@ from analyzer.dnssec import evaluate_dnssec
 from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.bimi import evaluate_bimi
+from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
 from analyzer.tlsrpt import evaluate_tls_rpt
 from analyzer.version import __version__
@@ -86,6 +87,31 @@ def _bimi(record: str | None = None) -> object:
     return evaluate_bimi(qname, "default", [DNSRecord("TXT", qname, record, 300)])
 
 
+def _tlsa(value: str | None = None) -> object:
+    qname = "_443._tcp.example.com"
+    if value is None:
+        return evaluate_tlsa(qname, ())
+    assoc = value.split()[-1] if value.split() else ""
+    parts = value.split()
+    return evaluate_tlsa(
+        qname,
+        [
+            DNSRecord(
+                "TLSA",
+                qname,
+                value,
+                300,
+                details=(
+                    ("Usage", f"{parts[0]} — DANE-EE"),
+                    ("Selector", f"{parts[1]} — SPKI"),
+                    ("Matching", f"{parts[2]} — SHA-256"),
+                    ("Association", assoc),
+                ),
+            )
+        ],
+    )
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -94,6 +120,7 @@ def _bind(
     mtasts=None,
     tlsrpt=None,
     bimi=None,
+    tlsa=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -101,6 +128,7 @@ def _bind(
     mock_cls.return_value.inspect_mta_sts.return_value = mtasts or _mtasts()
     mock_cls.return_value.inspect_tls_rpt.return_value = tlsrpt or _tlsrpt()
     mock_cls.return_value.inspect_bimi.return_value = bimi or _bimi()
+    mock_cls.return_value.inspect_tlsa.return_value = tlsa or _tlsa()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -405,6 +433,23 @@ def test_cli_prints_bimi(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_tlsa(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        tlsa=_tlsa(f"3 1 1 {'ab' * 32}"),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "DANE / TLSA" in output
+    assert "Status: FOUND" in output
+    assert "_443._tcp.example.com" in output
+    assert "DANE-EE" in output
+    mock_resolver_cls.return_value.inspect_tlsa.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -501,6 +546,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_mta_sts.assert_not_called()
     mock_resolver_cls.return_value.inspect_tls_rpt.assert_not_called()
     mock_resolver_cls.return_value.inspect_bimi.assert_not_called()
+    mock_resolver_cls.return_value.inspect_tlsa.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -601,6 +647,13 @@ def test_cli_record_srv_hints_srv_flag(capsys) -> None:
     err = capsys.readouterr().err
     assert "--srv" in err
     assert "apex" in err.lower() or "not at the apex" in err.lower()
+
+
+def test_cli_record_tlsa_hints_dane(capsys) -> None:
+    assert run(["example.com", "--record", "TLSA"]) == 1
+    err = capsys.readouterr().err
+    assert "_443._tcp" in err
+    assert "apex" in err.lower()
 
 
 def test_cli_rejects_all_with_record(capsys) -> None:
@@ -804,6 +857,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["mta_sts"]["query_name"] == "_mta-sts.example.com"
     assert data["tls_rpt"]["query_name"] == "_smtp._tls.example.com"
     assert data["bimi"]["query_name"] == "default._bimi.example.com"
+    assert data["tlsa"]["query_name"] == "_443._tcp.example.com"
 
 
 @patch("cli.interface.DNSResolver")

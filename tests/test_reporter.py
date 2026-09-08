@@ -56,6 +56,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["mta_sts"] is None
     assert payload["tls_rpt"] is None
     assert payload["bimi"] is None
+    assert payload["tlsa"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -314,6 +315,59 @@ def test_json_and_html_include_bimi() -> None:
                 "default._bimi.example.com",
                 "default",
                 [DNSRecord("TXT", "default._bimi.example.com", "v=BIMI1; l=<script>x</script>", 300)],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_tlsa() -> None:
+    from analyzer.tlsa import evaluate_tlsa
+
+    observation = evaluate_tlsa(
+        "_443._tcp.example.com",
+        [
+            DNSRecord(
+                "TLSA",
+                "_443._tcp.example.com",
+                "3 1 1 " + "ab" * 32,
+                300,
+                details=(
+                    ("Usage", "3 — DANE-EE"),
+                    ("Selector", "1 — SPKI"),
+                    ("Matching", "1 — SHA-256"),
+                    ("Association", "ab" * 32),
+                ),
+            )
+        ],
+    )
+    result = _result(tlsa=observation)
+    payload = result_to_dict(result)
+    assert payload["tlsa"]["status"] == "FOUND"
+    assert payload["tlsa"]["query_name"] == "_443._tcp.example.com"
+    assert payload["tlsa"]["records"][0]["usage"] == 3
+    page = dumps_html(result)
+    assert "_443._tcp.example.com" in page
+    assert "DANE-EE" in page
+    xss = dumps_html(
+        _result(
+            tlsa=evaluate_tlsa(
+                "_443._tcp.example.com",
+                [
+                    DNSRecord(
+                        "TLSA",
+                        "_443._tcp.example.com",
+                        "3 1 1 <script>x</script>",
+                        300,
+                        details=(
+                            ("Usage", "3 — DANE-EE"),
+                            ("Selector", "1 — SPKI"),
+                            ("Matching", "1 — SHA-256"),
+                            ("Association", "<script>x</script>"),
+                        ),
+                    )
+                ],
             )
         )
     )
