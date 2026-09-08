@@ -500,6 +500,70 @@ def test_tls_rpt_found_with_rua_adds_no_points() -> None:
     assert report.risk.value == 0
 
 
+def test_bimi_missing_is_info_and_unscored() -> None:
+    from analyzer.bimi import evaluate_bimi
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_bimi("default._bimi.example.com", "default", ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        bimi=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "bimi_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["bimi_missing"] == 0
+    assert report.risk.value == 0
+
+
+def test_bimi_found_with_location_and_enforcing_dmarc_adds_no_points() -> None:
+    from analyzer.bimi import evaluate_bimi
+
+    observation = evaluate_bimi(
+        "default._bimi.example.com",
+        "default",
+        [DNSRecord("TXT", "default._bimi.example.com", "v=BIMI1; l=https://example.com/logo.svg", 300)],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        bimi=observation,
+    )
+    assert not any(item.code.startswith("bimi_") for item in report.findings)
+    assert report.risk.value == 0
+
+
+def test_bimi_found_without_enforcing_dmarc_is_info() -> None:
+    from analyzer.bimi import evaluate_bimi
+
+    observation = evaluate_bimi(
+        "default._bimi.example.com",
+        "default",
+        [DNSRecord("TXT", "default._bimi.example.com", "v=BIMI1; l=https://example.com/logo.svg", 300)],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=none", 300),
+        ]),
+        bimi=observation,
+    )
+    finding = next(item for item in report.findings if item.code == "bimi_without_enforcing_dmarc")
+    assert finding.severity == "info"
+    from analyzer.risk import WEIGHTS
+    assert WEIGHTS["bimi_without_enforcing_dmarc"] == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

@@ -13,6 +13,7 @@ import io
 import json
 from pathlib import Path
 
+from analyzer.bimi import BimiObservation
 from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
@@ -64,6 +65,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "dmarc": _dmarc_dict(result.dmarc),
         "mta_sts": _mta_sts_dict(result.mta_sts),
         "tls_rpt": _tls_rpt_dict(result.tls_rpt),
+        "bimi": _bimi_dict(result.bimi),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -235,6 +237,22 @@ def _tls_rpt_dict(observation: TlsRptObservation | None) -> dict[str, object] | 
     }
 
 
+def _bimi_dict(observation: BimiObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "selector": observation.selector,
+        "query_name": observation.query_name,
+        "record": observation.record,
+        "location": observation.location,
+        "authority": observation.authority,
+        "multiple_records": observation.multiple_records,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -360,6 +378,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_mta_sts(result.mta_sts))
     if result.tls_rpt is not None:
         parts.extend(_html_tls_rpt(result.tls_rpt))
+    if result.bimi is not None:
+        parts.extend(_html_bimi(result.bimi))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -521,6 +541,25 @@ def _html_tls_rpt(observation: TlsRptObservation) -> list[str]:
         parts.append(f"<p><code>{_e(observation.record)}</code></p>")
         if observation.rua:
             parts.append(f"<p>rua={_e(observation.rua)}</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_bimi(observation: BimiObservation) -> list[str]:
+    parts = [
+        "<h2>BIMI</h2>",
+        f"<p>Selector: <code>{_e(observation.selector)}</code></p>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.record:
+        parts.append(f"<p><code>{_e(observation.record)}</code></p>")
+        if observation.location:
+            parts.append(f"<p>l={_e(observation.location)} (URL not fetched)</p>")
+        if observation.authority:
+            parts.append(f"<p>a={_e(observation.authority)} (URL not fetched)</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

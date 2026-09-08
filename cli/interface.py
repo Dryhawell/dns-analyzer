@@ -41,6 +41,7 @@ from analyzer.exceptions import (
     NoNameserversError,
     ResolverConfigError,
 )
+from analyzer.bimi import BimiObservation
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.mtasts import MtaStsObservation
 from analyzer.records import describe_ip_scope
@@ -87,12 +88,12 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, TLS-RPT, or SRV is an observation, not proof of compromise.
+MTA-STS, TLS-RPT, BIMI, or SRV is an observation, not proof of compromise.
 """
 
 
@@ -101,7 +102,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -166,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -615,6 +616,7 @@ def _print_lookup(
     srv: tuple[SrvObservation, ...] | None = None,
     mta_sts: MtaStsObservation | None = None,
     tls_rpt: TlsRptObservation | None = None,
+    bimi: BimiObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -667,14 +669,18 @@ def _print_lookup(
             or dmarc is None
             or mta_sts is None
             or tls_rpt is None
+            or bimi is None
             or security is None
         ):
-            raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT results.")
+            raise RuntimeError(
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI results."
+            )
         _print_dnssec(dnssec)
         _print_spf(spf)
         _print_dmarc(dmarc)
         _print_mta_sts(mta_sts)
         _print_tls_rpt(tls_rpt)
+        _print_bimi(bimi)
         _print_security(security)
 
 
@@ -787,6 +793,30 @@ def _print_tls_rpt(observation: TlsRptObservation) -> None:
             print("rua= (missing)")
         if observation.multiple_records:
             print("Note: multiple v=TLSRPTv1 TXT records (senders may ignore rua).")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_bimi(observation: BimiObservation) -> None:
+    print("BIMI")
+    print("────────────────────────")
+    print(f"Selector: {observation.selector}")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.record:
+        print("TXT:")
+        print(observation.record)
+        if observation.location:
+            print(f"l={observation.location} (URL not fetched)")
+        else:
+            print("l= (missing)")
+        if observation.authority:
+            print(f"a={observation.authority} (URL not fetched)")
+        if observation.multiple_records:
+            print("Note: multiple v=BIMI1 TXT records (receivers may ignore BIMI).")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1186,14 +1216,16 @@ def _run(argv: list[str] | None = None) -> int:
     srv_observations = None
     mta_sts = None
     tls_rpt = None
+    bimi = None
     try:
         if view.show_security:
-            workers = 4 + len(selectors) + len(srv_specs)
-            with ThreadPoolExecutor(max_workers=min(8, max(4, workers))) as pool:
+            workers = 5 + len(selectors) + len(srv_specs)
+            with ThreadPoolExecutor(max_workers=min(8, max(5, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
                 fut_mtasts = pool.submit(resolver.inspect_mta_sts, domain)
                 fut_tlsrpt = pool.submit(resolver.inspect_tls_rpt, domain)
+                fut_bimi = pool.submit(resolver.inspect_bimi, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1206,6 +1238,7 @@ def _run(argv: list[str] | None = None) -> int:
                 dmarc = fut_dmarc.result()
                 mta_sts = fut_mtasts.result()
                 tls_rpt = fut_tlsrpt.result()
+                bimi = fut_bimi.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1221,6 +1254,7 @@ def _run(argv: list[str] | None = None) -> int:
                 srv_observations or (),
                 mta_sts,
                 tls_rpt,
+                bimi,
             )
         elif selectors or srv_specs:
             extra = len(selectors) + len(srv_specs)
@@ -1282,6 +1316,7 @@ def _run(argv: list[str] | None = None) -> int:
         dmarc=dmarc,
         mta_sts=mta_sts,
         tls_rpt=tls_rpt,
+        bimi=bimi,
         dkim=dkim_observations,
         srv=srv_observations,
         security=security,
@@ -1312,6 +1347,7 @@ def _run(argv: list[str] | None = None) -> int:
             srv_observations,
             mta_sts,
             tls_rpt,
+            bimi,
         )
         if comparison is not None:
             _print_comparison(comparison)

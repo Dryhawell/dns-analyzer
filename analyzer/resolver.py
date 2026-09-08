@@ -19,6 +19,12 @@ import dns.exception
 import dns.flags
 import dns.resolver
 
+from analyzer.bimi import (
+    DEFAULT_SELECTOR,
+    BimiObservation,
+    bimi_query_name,
+    evaluate_bimi,
+)
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
@@ -242,6 +248,17 @@ class DNSResolver:
         except DNSQueryError as exc:
             return evaluate_tls_rpt(qname, (), error=str(exc))
         return evaluate_tls_rpt(qname, records)
+
+    def inspect_bimi(self, name: str) -> BimiObservation:
+        """TXT lookup at default._bimi.<name>. Does not fetch logo or VMC URLs."""
+        qname = bimi_query_name(name)
+        try:
+            records = self.resolve_txt(qname)
+        except DomainNotFoundError:
+            return evaluate_bimi(qname, DEFAULT_SELECTOR, ())
+        except DNSQueryError as exc:
+            return evaluate_bimi(qname, DEFAULT_SELECTOR, (), error=str(exc))
+        return evaluate_bimi(qname, DEFAULT_SELECTOR, records)
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

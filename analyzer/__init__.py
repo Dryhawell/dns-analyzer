@@ -1,5 +1,6 @@
 """Core DNS analysis package."""
 
+from analyzer.bimi import BimiObservation, evaluate_bimi
 from analyzer.dmarc import DmarcObservation, evaluate_dmarc
 from analyzer.dkim import DkimObservation, evaluate_dkim
 from analyzer.dnssec import DnssecObservation
@@ -59,4 +60,6 @@ __all__ = [
     "evaluate_mta_sts",
     "TlsRptObservation",
     "evaluate_tls_rpt",
+    "BimiObservation",
+    "evaluate_bimi",
 ]

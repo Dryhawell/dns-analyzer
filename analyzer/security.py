@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from analyzer.bimi import BimiObservation
 from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
 from analyzer.dnssec import DnssecObservation
@@ -52,7 +53,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI observations."""
 
     def analyze(
         self,
@@ -64,6 +65,7 @@ class SecurityAnalyzer:
         srv: Sequence[SrvObservation] = (),
         mta_sts: MtaStsObservation | None = None,
         tls_rpt: TlsRptObservation | None = None,
+        bimi: BimiObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -75,6 +77,8 @@ class SecurityAnalyzer:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
             findings.extend(self._tls_rpt(tls_rpt))
+        if bimi is not None:
+            findings.extend(self._bimi(bimi, dmarc))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -491,6 +495,86 @@ class SecurityAnalyzer:
                     ),
                     recommendation="Add rua=mailto:... or rua=https:... to the v=TLSRPTv1 TXT.",
                     code="tlsrpt_rua_missing",
+                )
+            )
+        return findings
+
+    def _bimi(
+        self,
+        observation: BimiObservation,
+        dmarc: DmarcObservation,
+    ) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="BIMI could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "logo record, and it is not a compromise."
+                    ),
+                    recommendation="Retry the default._bimi lookup before treating BIMI as unpublished.",
+                    code="bimi_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="BIMI TXT not published",
+                    description=(
+                        f"No v=BIMI1 record at {observation.query_name}. "
+                        "Only the default selector is queried. This is common "
+                        "and is not proof that mail is unbranded or compromised."
+                    ),
+                    recommendation=(
+                        "If you want BIMI, publish v=BIMI1; l=https://... at "
+                        "default._bimi and keep DMARC at quarantine or reject. "
+                        "This tool does not fetch the logo."
+                    ),
+                    code="bimi_missing",
+                )
+            ]
+        findings: list[SecurityFinding] = []
+        if observation.multiple_records:
+            findings.append(
+                SecurityFinding(
+                    severity="low",
+                    title="Multiple BIMI TXT records",
+                    description=(
+                        "More than one v=BIMI1 TXT was returned. Receivers may "
+                        "ignore the logo record."
+                    ),
+                    recommendation="Keep a single v=BIMI1 record at default._bimi.<domain>.",
+                    code="bimi_multiple",
+                )
+            )
+        if not observation.location:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="BIMI TXT has no l=",
+                    description=(
+                        "BIMI needs an l= HTTPS URL for the SVG logo. Absence is "
+                        "a configuration signal, not a compromise. The URL is not fetched."
+                    ),
+                    recommendation="Add l=https://... to the v=BIMI1 TXT (SVG, not a raster image).",
+                    code="bimi_location_missing",
+                )
+            )
+        enforcing = dmarc.status == "FOUND" and dmarc.policy in {"quarantine", "reject"}
+        if not enforcing:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="BIMI published without enforcing DMARC",
+                    description=(
+                        "A BIMI TXT is visible, but DMARC is missing or p=none. "
+                        "Most inboxes will not show the logo without quarantine or reject. "
+                        "This is not a compromise."
+                    ),
+                    recommendation="Keep BIMI only after DMARC p=quarantine or p=reject is in place.",
+                    code="bimi_without_enforcing_dmarc",
                 )
             )
         return findings

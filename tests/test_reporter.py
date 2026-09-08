@@ -55,6 +55,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["dmarc"] is None
     assert payload["mta_sts"] is None
     assert payload["tls_rpt"] is None
+    assert payload["bimi"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -284,6 +285,35 @@ def test_json_and_html_include_tls_rpt() -> None:
             tls_rpt=evaluate_tls_rpt(
                 "_smtp._tls.example.com",
                 [DNSRecord("TXT", "_smtp._tls.example.com", "v=TLSRPTv1; rua=<script>x</script>", 300)],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_bimi() -> None:
+    from analyzer.bimi import evaluate_bimi
+
+    observation = evaluate_bimi(
+        "default._bimi.example.com",
+        "default",
+        [DNSRecord("TXT", "default._bimi.example.com", "v=BIMI1; l=https://example.com/logo.svg", 300)],
+    )
+    result = _result(bimi=observation)
+    payload = result_to_dict(result)
+    assert payload["bimi"]["status"] == "FOUND"
+    assert payload["bimi"]["selector"] == "default"
+    assert payload["bimi"]["location"] == "https://example.com/logo.svg"
+    page = dumps_html(result)
+    assert "default._bimi.example.com" in page
+    assert "https://example.com/logo.svg" in page
+    xss = dumps_html(
+        _result(
+            bimi=evaluate_bimi(
+                "default._bimi.example.com",
+                "default",
+                [DNSRecord("TXT", "default._bimi.example.com", "v=BIMI1; l=<script>x</script>", 300)],
             )
         )
     )

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from analyzer.bimi import BimiObservation
 from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
@@ -35,6 +36,7 @@ class DNSAnalysisResult:
     dmarc: DmarcObservation | None = None
     mta_sts: MtaStsObservation | None = None
     tls_rpt: TlsRptObservation | None = None
+    bimi: BimiObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     security: SecurityReport | None = None

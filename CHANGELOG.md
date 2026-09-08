@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.8.0 — 2026-09-08
+
+BIMI DNS discovery (RFC 9091). Logo and VMC URLs are not fetched.
+
+### Added
+
+- Default / `--security` / `--all` query TXT at `default._bimi.<domain>` (`v=BIMI1; l=...; a=...`)
+- CLI/JSON/HTML show `l=` (logo URL) and `a=` (authority/VMC URL) without HTTP GET
+- Findings: `bimi_missing` / `bimi_unreadable` / `bimi_location_missing` / `bimi_without_enforcing_dmarc` are info (+0); multiple TXT is low (+5)
+
+### Notes
+
+- Only the well-known selector `default` is queried; other selectors are not guessed
+- BIMI is a logo URL on aligned mail, not a certificate of authenticity
+- Missing BIMI is common and is not treated as a compromise
+
 ## 1.7.0 — 2026-09-07
 
 TLS-RPT DNS discovery (RFC 8460). SMTP is not probed; HTTPS rua URLs are not fetched.

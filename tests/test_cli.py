@@ -10,6 +10,7 @@ from analyzer.dmarc import evaluate_dmarc
 from analyzer.dnssec import evaluate_dnssec
 from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
+from analyzer.bimi import evaluate_bimi
 from analyzer.mtasts import evaluate_mta_sts
 from analyzer.tlsrpt import evaluate_tls_rpt
 from analyzer.version import __version__
@@ -78,12 +79,28 @@ def _tlsrpt(record: str | None = None) -> object:
     return evaluate_tls_rpt(qname, [DNSRecord("TXT", qname, record, 300)])
 
 
-def _bind(mock_cls, lookup: CoreLookup, dnssec=None, dmarc=None, mtasts=None, tlsrpt=None) -> None:
+def _bimi(record: str | None = None) -> object:
+    qname = "default._bimi.example.com"
+    if record is None:
+        return evaluate_bimi(qname, "default", ())
+    return evaluate_bimi(qname, "default", [DNSRecord("TXT", qname, record, 300)])
+
+
+def _bind(
+    mock_cls,
+    lookup: CoreLookup,
+    dnssec=None,
+    dmarc=None,
+    mtasts=None,
+    tlsrpt=None,
+    bimi=None,
+) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
     mock_cls.return_value.inspect_dmarc.return_value = dmarc or _dmarc()
     mock_cls.return_value.inspect_mta_sts.return_value = mtasts or _mtasts()
     mock_cls.return_value.inspect_tls_rpt.return_value = tlsrpt or _tlsrpt()
+    mock_cls.return_value.inspect_bimi.return_value = bimi or _bimi()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -370,6 +387,24 @@ def test_cli_prints_tls_rpt(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_bimi(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        bimi=_bimi("v=BIMI1; l=https://example.com/logo.svg"),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "BIMI" in output
+    assert "Status: FOUND" in output
+    assert "default._bimi.example.com" in output
+    assert "l=https://example.com/logo.svg" in output
+    assert "URL not fetched" in output
+    mock_resolver_cls.return_value.inspect_bimi.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -465,6 +500,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
     mock_resolver_cls.return_value.inspect_mta_sts.assert_not_called()
     mock_resolver_cls.return_value.inspect_tls_rpt.assert_not_called()
+    mock_resolver_cls.return_value.inspect_bimi.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -767,6 +803,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["srv"] is None
     assert data["mta_sts"]["query_name"] == "_mta-sts.example.com"
     assert data["tls_rpt"]["query_name"] == "_smtp._tls.example.com"
+    assert data["bimi"]["query_name"] == "default._bimi.example.com"
 
 
 @patch("cli.interface.DNSResolver")
