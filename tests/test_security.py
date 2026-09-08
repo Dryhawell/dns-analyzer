@@ -669,6 +669,93 @@ def test_sshfp_found_adds_no_points() -> None:
     assert report.risk.value == 0
 
 
+def test_fcrdns_no_ptr_is_info_and_unscored() -> None:
+    from analyzer.fcrdns import FcrdnsCheck, evaluate_fcrdns
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_fcrdns(
+        [
+            FcrdnsCheck(
+                ip="93.184.216.34",
+                ptr_query="34.216.184.93.in-addr.arpa",
+                ptr_names=(),
+                forward_ips=(),
+                status="NO PTR",
+            )
+        ]
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        fcrdns=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "fcrdns_no_ptr")
+    assert missing.severity == "info"
+    assert WEIGHTS["fcrdns_no_ptr"] == 0
+    assert report.risk.value == 0
+
+
+def test_fcrdns_mismatch_is_info_and_unscored() -> None:
+    from analyzer.fcrdns import FcrdnsCheck, evaluate_fcrdns
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_fcrdns(
+        [
+            FcrdnsCheck(
+                ip="93.184.216.34",
+                ptr_query="34.216.184.93.in-addr.arpa",
+                ptr_names=("other.example",),
+                forward_ips=("192.0.2.1",),
+                status="MISMATCH",
+            )
+        ]
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        fcrdns=observation,
+    )
+    mismatch = next(item for item in report.findings if item.code == "fcrdns_mismatch")
+    assert mismatch.severity == "info"
+    assert WEIGHTS["fcrdns_mismatch"] == 0
+    assert report.risk.value == 0
+
+
+def test_fcrdns_confirmed_adds_no_points() -> None:
+    from analyzer.fcrdns import FcrdnsCheck, evaluate_fcrdns
+
+    observation = evaluate_fcrdns(
+        [
+            FcrdnsCheck(
+                ip="93.184.216.34",
+                ptr_query="34.216.184.93.in-addr.arpa",
+                ptr_names=("example.com",),
+                forward_ips=("93.184.216.34",),
+                status="CONFIRMED",
+            )
+        ]
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        fcrdns=observation,
+    )
+    assert not any(item.code.startswith("fcrdns_") for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

@@ -2,6 +2,21 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.11.0 — 2026-09-08
+
+Forward-confirmed reverse DNS (FCrDNS). The IP is not contacted.
+
+### Added
+
+- Default / `--security` / `--all` check up to 8 A/AAAA addresses: PTR, then forward A/AAAA
+- CLI/JSON/HTML show `CONFIRMED` / `NO PTR` / `MISMATCH` / `UNREADABLE`
+- Findings: `fcrdns_no_ptr` / `fcrdns_mismatch` / `fcrdns_unreadable` are info (+0)
+
+### Notes
+
+- FCrDNS does not open a connection to the address
+- Missing PTR is common; a mismatch is not treated as hijacking
+
 ## 1.10.0 — 2026-09-08
 
 SSHFP DNS discovery (RFC 4255). SSH is not probed.

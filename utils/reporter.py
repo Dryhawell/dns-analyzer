@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from analyzer.bimi import BimiObservation
+from analyzer.fcrdns import FcrdnsCheck, FcrdnsObservation
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -70,6 +71,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "bimi": _bimi_dict(result.bimi),
         "tlsa": _tlsa_dict(result.tlsa),
         "sshfp": _sshfp_dict(result.sshfp),
+        "fcrdns": _fcrdns_dict(result.fcrdns),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -307,6 +309,27 @@ def _sshfp_dict(observation: SshfpObservation | None) -> dict[str, object] | Non
     }
 
 
+def _fcrdns_check_dict(item: FcrdnsCheck) -> dict[str, object]:
+    return {
+        "ip": item.ip,
+        "ptr_query": item.ptr_query,
+        "ptr_names": list(item.ptr_names),
+        "forward_ips": list(item.forward_ips),
+        "status": item.status,
+        "error": item.error,
+    }
+
+
+def _fcrdns_dict(observation: FcrdnsObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "checks": [_fcrdns_check_dict(item) for item in observation.checks],
+        "truncated": observation.truncated,
+        "note": observation.note,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -438,6 +461,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_tlsa(result.tlsa))
     if result.sshfp is not None:
         parts.extend(_html_sshfp(result.sshfp))
+    if result.fcrdns is not None:
+        parts.extend(_html_fcrdns(result.fcrdns))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -664,6 +689,25 @@ def _html_sshfp(observation: SshfpObservation) -> list[str]:
             parts.append("<p class=\"note\">fingerprint hex truncated</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_fcrdns(observation: FcrdnsObservation) -> list[str]:
+    parts = ["<h2>FCrDNS</h2>"]
+    if not observation.checks:
+        parts.append("<p>No A/AAAA addresses to check.</p>")
+    for item in observation.checks:
+        parts.append(f"<p><code>{_e(item.ip)}</code> — <strong>{_e(item.status)}</strong></p>")
+        parts.append(f"<p>PTR query: <code>{_e(item.ptr_query)}</code></p>")
+        if item.ptr_names:
+            parts.append(f"<p>PTR: <code>{_e(', '.join(item.ptr_names))}</code></p>")
+        if item.forward_ips:
+            parts.append(f"<p>Forward: <code>{_e(', '.join(item.forward_ips))}</code></p>")
+        if item.error:
+            parts.append(f"<p class=\"note\">{_e(item.error)}</p>")
+    if observation.truncated:
+        parts.append("<p class=\"note\">More than 8 addresses; extra A/AAAA were not checked.</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
     return parts
 

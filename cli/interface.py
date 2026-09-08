@@ -42,6 +42,7 @@ from analyzer.exceptions import (
     ResolverConfigError,
 )
 from analyzer.bimi import BimiObservation
+from analyzer.fcrdns import FcrdnsObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.models import CoreLookup, DNSRecord
@@ -90,12 +91,13 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
 MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, or SRV is an observation, not proof of compromise.
+Missing PTR / FCrDNS mismatch is also an observation, not hijacking.
 """
 
 
@@ -104,7 +106,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -170,7 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -632,6 +634,7 @@ def _print_lookup(
     bimi: BimiObservation | None = None,
     tlsa: TlsaObservation | None = None,
     sshfp: SshfpObservation | None = None,
+    fcrdns: FcrdnsObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -687,10 +690,11 @@ def _print_lookup(
             or bimi is None
             or tlsa is None
             or sshfp is None
+            or fcrdns is None
             or security is None
         ):
             raise RuntimeError(
-                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP results."
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS results."
             )
         _print_dnssec(dnssec)
         _print_spf(spf)
@@ -700,6 +704,7 @@ def _print_lookup(
         _print_bimi(bimi)
         _print_tlsa(tlsa)
         _print_sshfp(sshfp)
+        _print_fcrdns(fcrdns)
         _print_security(security)
 
 
@@ -882,6 +887,28 @@ def _print_sshfp(observation: SshfpObservation) -> None:
                 print("  fingerprint hex truncated")
     if observation.error:
         print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_fcrdns(observation: FcrdnsObservation) -> None:
+    print("FCrDNS")
+    print("────────────────────────")
+    if not observation.checks:
+        print("No A/AAAA addresses to check.")
+    for item in observation.checks:
+        print(f"{item.ip}")
+        print(f"  PTR query: {item.ptr_query}")
+        print(f"  Status: {item.status}")
+        if item.ptr_names:
+            print(f"  PTR: {', '.join(item.ptr_names)}")
+        if item.forward_ips:
+            print(f"  Forward: {', '.join(item.forward_ips)}")
+        if item.error:
+            print(f"  Note: {item.error}")
+    if observation.truncated:
+        print("Note: more than 8 addresses; extra A/AAAA were not checked.")
     print()
     print(observation.note)
     print()
@@ -1282,10 +1309,11 @@ def _run(argv: list[str] | None = None) -> int:
     bimi = None
     tlsa = None
     sshfp = None
+    fcrdns = None
     try:
         if view.show_security:
-            workers = 7 + len(selectors) + len(srv_specs)
-            with ThreadPoolExecutor(max_workers=min(8, max(7, workers))) as pool:
+            workers = 8 + len(selectors) + len(srv_specs)
+            with ThreadPoolExecutor(max_workers=min(8, max(8, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
                 fut_mtasts = pool.submit(resolver.inspect_mta_sts, domain)
@@ -1293,6 +1321,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_bimi = pool.submit(resolver.inspect_bimi, domain)
                 fut_tlsa = pool.submit(resolver.inspect_tlsa, domain)
                 fut_sshfp = pool.submit(resolver.inspect_sshfp, domain)
+                fut_fcrdns = pool.submit(resolver.inspect_fcrdns, lookup)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1308,6 +1337,7 @@ def _run(argv: list[str] | None = None) -> int:
                 bimi = fut_bimi.result()
                 tlsa = fut_tlsa.result()
                 sshfp = fut_sshfp.result()
+                fcrdns = fut_fcrdns.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1326,6 +1356,7 @@ def _run(argv: list[str] | None = None) -> int:
                 bimi,
                 tlsa,
                 sshfp,
+                fcrdns,
             )
         elif selectors or srv_specs:
             extra = len(selectors) + len(srv_specs)
@@ -1390,6 +1421,7 @@ def _run(argv: list[str] | None = None) -> int:
         bimi=bimi,
         tlsa=tlsa,
         sshfp=sshfp,
+        fcrdns=fcrdns,
         dkim=dkim_observations,
         srv=srv_observations,
         security=security,
@@ -1423,6 +1455,7 @@ def _run(argv: list[str] | None = None) -> int:
             bimi,
             tlsa,
             sshfp,
+            fcrdns,
         )
         if comparison is not None:
             _print_comparison(comparison)

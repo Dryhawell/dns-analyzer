@@ -18,6 +18,7 @@ from analyzer.mtasts import MtaStsObservation
 from analyzer.security import SecurityReport
 from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
+from analyzer.fcrdns import FcrdnsObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -41,6 +42,7 @@ class DNSAnalysisResult:
     bimi: BimiObservation | None = None
     tlsa: TlsaObservation | None = None
     sshfp: SshfpObservation | None = None
+    fcrdns: FcrdnsObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     security: SecurityReport | None = None

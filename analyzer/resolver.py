@@ -11,6 +11,7 @@ DNSResolver(nameservers=...) or a JSON config file (Phase 20).
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -24,6 +25,12 @@ from analyzer.bimi import (
     BimiObservation,
     bimi_query_name,
     evaluate_bimi,
+)
+from analyzer.fcrdns import (
+    MAX_ADDRESSES,
+    FcrdnsCheck,
+    FcrdnsObservation,
+    evaluate_fcrdns,
 )
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
@@ -44,13 +51,22 @@ from analyzer.exceptions import (
     NoNameserversError,
 )
 from analyzer.models import CoreLookup, DNSRecord
-from analyzer.records import records_from_answer
+from analyzer.records import canonicalize_ip, records_from_answer
 from analyzer.reverse import ptr_name
 from utils.logger import get_logger
 
 _DEFAULT_TIMEOUT = 5.0
 CORE_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA", "HTTPS", "SVCB")
 _log = get_logger("resolver")
+
+
+def _unique_ips(lookup: CoreLookup) -> tuple[str, ...]:
+    seen: list[str] = []
+    for record in lookup.a + lookup.aaaa:
+        value = canonicalize_ip(record.value)
+        if value not in seen:
+            seen.append(value)
+    return tuple(seen)
 
 
 def _normalize_types(types: Sequence[str] | None) -> tuple[str, ...]:
@@ -289,6 +305,74 @@ class DNSResolver:
 
     def resolve_sshfp(self, name: str) -> list[DNSRecord]:
         return self._query(name, "SSHFP")
+
+    def inspect_fcrdns(self, lookup: CoreLookup) -> FcrdnsObservation:
+        """PTR then forward A/AAAA for each address. Does not contact the IP."""
+        ips = _unique_ips(lookup)
+        truncated = len(ips) > MAX_ADDRESSES
+        checks = tuple(self._fcrdns_check(ip) for ip in ips[:MAX_ADDRESSES])
+        return evaluate_fcrdns(checks, truncated=truncated)
+
+    def _fcrdns_check(self, ip: str) -> FcrdnsCheck:
+        qname = ptr_name(ip)
+        try:
+            ptr_records = self.resolve_reverse(ip)
+        except DNSQueryError as exc:
+            return FcrdnsCheck(
+                ip=ip,
+                ptr_query=qname,
+                ptr_names=(),
+                forward_ips=(),
+                status="UNREADABLE",
+                error=str(exc),
+            )
+        names = tuple(record.value.rstrip(".").lower() for record in ptr_records if record.value)
+        if not names:
+            return FcrdnsCheck(
+                ip=ip,
+                ptr_query=qname,
+                ptr_names=(),
+                forward_ips=(),
+                status="NO PTR",
+            )
+        version = ipaddress.ip_address(ip).version
+        forward: list[str] = []
+        errors: list[str] = []
+        for host in names:
+            try:
+                answers = self.resolve_a(host) if version == 4 else self.resolve_aaaa(host)
+            except DomainNotFoundError:
+                answers = []
+            except DNSQueryError as exc:
+                errors.append(str(exc))
+                continue
+            forward.extend(canonicalize_ip(record.value) for record in answers)
+        forward_ips = tuple(dict.fromkeys(forward))
+        target = canonicalize_ip(ip)
+        if target in forward_ips:
+            return FcrdnsCheck(
+                ip=ip,
+                ptr_query=qname,
+                ptr_names=names,
+                forward_ips=forward_ips,
+                status="CONFIRMED",
+            )
+        if errors and not forward_ips:
+            return FcrdnsCheck(
+                ip=ip,
+                ptr_query=qname,
+                ptr_names=names,
+                forward_ips=(),
+                status="UNREADABLE",
+                error="; ".join(errors),
+            )
+        return FcrdnsCheck(
+            ip=ip,
+            ptr_query=qname,
+            ptr_names=names,
+            forward_ips=forward_ips,
+            status="MISMATCH",
+        )
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

@@ -1,6 +1,7 @@
 """Core DNS analysis package."""
 
 from analyzer.bimi import BimiObservation, evaluate_bimi
+from analyzer.fcrdns import FcrdnsObservation, evaluate_fcrdns
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa
 from analyzer.dmarc import DmarcObservation, evaluate_dmarc
@@ -68,4 +69,6 @@ __all__ = [
     "evaluate_tlsa",
     "SshfpObservation",
     "evaluate_sshfp",
+    "FcrdnsObservation",
+    "evaluate_fcrdns",
 ]

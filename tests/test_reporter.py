@@ -58,6 +58,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["bimi"] is None
     assert payload["tlsa"] is None
     assert payload["sshfp"] is None
+    assert payload["fcrdns"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -419,6 +420,45 @@ def test_json_and_html_include_sshfp() -> None:
                         ),
                     )
                 ],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_fcrdns() -> None:
+    from analyzer.fcrdns import FcrdnsCheck, evaluate_fcrdns
+
+    observation = evaluate_fcrdns(
+        [
+            FcrdnsCheck(
+                ip="93.184.216.34",
+                ptr_query="34.216.184.93.in-addr.arpa",
+                ptr_names=("example.com",),
+                forward_ips=("93.184.216.34",),
+                status="CONFIRMED",
+            )
+        ]
+    )
+    result = _result(fcrdns=observation)
+    payload = result_to_dict(result)
+    assert payload["fcrdns"]["checks"][0]["status"] == "CONFIRMED"
+    page = dumps_html(result)
+    assert "FCrDNS" in page
+    assert "CONFIRMED" in page
+    xss = dumps_html(
+        _result(
+            fcrdns=evaluate_fcrdns(
+                [
+                    FcrdnsCheck(
+                        ip="93.184.216.34",
+                        ptr_query="34.216.184.93.in-addr.arpa",
+                        ptr_names=("<script>x</script>",),
+                        forward_ips=(),
+                        status="NO PTR",
+                    )
+                ]
             )
         )
     )

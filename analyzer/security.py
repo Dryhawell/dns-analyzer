@@ -19,6 +19,7 @@ from analyzer.records import describe_ip_scope
 from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
+from analyzer.fcrdns import FcrdnsObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -55,7 +56,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS observations."""
 
     def analyze(
         self,
@@ -70,6 +71,7 @@ class SecurityAnalyzer:
         bimi: BimiObservation | None = None,
         tlsa: TlsaObservation | None = None,
         sshfp: SshfpObservation | None = None,
+        fcrdns: FcrdnsObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -87,6 +89,8 @@ class SecurityAnalyzer:
             findings.extend(self._tlsa(tlsa))
         if sshfp is not None:
             findings.extend(self._sshfp(sshfp))
+        if fcrdns is not None:
+            findings.extend(self._fcrdns(fcrdns))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -652,6 +656,59 @@ class SecurityAnalyzer:
                 )
             ]
         return []
+
+    def _fcrdns(self, observation: FcrdnsObservation) -> list[SecurityFinding]:
+        findings: list[SecurityFinding] = []
+        unread = [item.ip for item in observation.checks if item.status == "UNREADABLE"]
+        missing = [item.ip for item in observation.checks if item.status == "NO PTR"]
+        mismatch = [item.ip for item in observation.checks if item.status == "MISMATCH"]
+        if unread:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="FCrDNS could not be read for some addresses",
+                    description=(
+                        "PTR or forward lookup timed out for: "
+                        + ", ".join(unread)
+                        + ". A timeout is not a missing PTR, and it is not a compromise."
+                    ),
+                    recommendation="Retry the reverse lookup before treating FCrDNS as unpublished.",
+                    code="fcrdns_unreadable",
+                )
+            )
+        if missing:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="No PTR for some addresses",
+                    description=(
+                        "These A/AAAA addresses have no PTR: "
+                        + ", ".join(missing)
+                        + ". Missing reverse DNS is common and is not a compromise."
+                    ),
+                    recommendation=(
+                        "If you operate the addresses, a PTR can help mail and ops. "
+                        "This tool does not contact the IP."
+                    ),
+                    code="fcrdns_no_ptr",
+                )
+            )
+        if mismatch:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="FCrDNS mismatch",
+                    description=(
+                        "PTR exists, but the forward lookup does not return the same IP: "
+                        + ", ".join(mismatch)
+                        + ". This can be CDN, shared hosting, or split-horizon — "
+                        "not proof of hijacking."
+                    ),
+                    recommendation="Compare PTR and A/AAAA only if you expect them to match.",
+                    code="fcrdns_mismatch",
+                )
+            )
+        return findings
 
     def _caa(self, lookup: CoreLookup) -> list[SecurityFinding]:
         if any(label == "CAA" for label, _ in lookup.errors):
