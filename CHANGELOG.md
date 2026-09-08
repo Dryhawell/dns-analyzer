@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.10.0 — 2026-09-08
+
+SSHFP DNS discovery (RFC 4255). SSH is not probed.
+
+### Added
+
+- Default / `--security` / `--all` query SSHFP at the scanned hostname
+- CLI/JSON/HTML show algorithm, fingerprint type, and fingerprint hex
+- Findings: `sshfp_missing` / `sshfp_unreadable` are info (+0)
+
+### Notes
+
+- This is a DNS record, not an SSH scan; port 22 is not opened
+- Missing SSHFP is common and is not treated as a compromise
+- `--record SSHFP` is rejected; the record is part of the security view
+
 ## 1.9.0 — 2026-09-08
 
 DANE TLSA DNS discovery (RFC 6698). TLS is not probed.

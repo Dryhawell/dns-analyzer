@@ -13,6 +13,7 @@ def _bind_lookup(mock_cls) -> None:
     from analyzer.dnssec import evaluate_dnssec
     from analyzer.models import CoreLookup
     from analyzer.bimi import evaluate_bimi
+    from analyzer.sshfp import evaluate_sshfp
     from analyzer.tlsa import evaluate_tlsa
     from analyzer.mtasts import evaluate_mta_sts
     from analyzer.tlsrpt import evaluate_tls_rpt
@@ -44,6 +45,9 @@ def _bind_lookup(mock_cls) -> None:
     )
     mock_cls.return_value.inspect_tlsa.return_value = evaluate_tlsa(
         "_443._tcp.example.com", ()
+    )
+    mock_cls.return_value.inspect_sshfp.return_value = evaluate_sshfp(
+        "example.com", ()
     )
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 

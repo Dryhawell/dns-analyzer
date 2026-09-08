@@ -19,6 +19,7 @@ from analyzer.records import describe_ip_scope
 from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
+from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
 
@@ -54,7 +55,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP observations."""
 
     def analyze(
         self,
@@ -68,6 +69,7 @@ class SecurityAnalyzer:
         tls_rpt: TlsRptObservation | None = None,
         bimi: BimiObservation | None = None,
         tlsa: TlsaObservation | None = None,
+        sshfp: SshfpObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -83,6 +85,8 @@ class SecurityAnalyzer:
             findings.extend(self._bimi(bimi, dmarc))
         if tlsa is not None:
             findings.extend(self._tlsa(tlsa))
+        if sshfp is not None:
+            findings.extend(self._sshfp(sshfp))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -612,6 +616,39 @@ class SecurityAnalyzer:
                         "This tool does not open TLS or check the live certificate."
                     ),
                     code="tlsa_missing",
+                )
+            ]
+        return []
+
+    def _sshfp(self, observation: SshfpObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="SSHFP could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "SSHFP record, and it is not a compromise."
+                    ),
+                    recommendation="Retry the SSHFP lookup before treating host-key fingerprints as unpublished.",
+                    code="sshfp_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="SSHFP not published",
+                    description=(
+                        f"No SSHFP record at {observation.query_name}. "
+                        "Absence is common for names that are not SSH hosts. "
+                        "This is not a compromise, and it does not mean SSH is open or closed."
+                    ),
+                    recommendation=(
+                        "If this hostname is an SSH server, publish SSHFP and keep DNSSEC "
+                        "visible to validating resolvers. This tool does not open port 22."
+                    ),
+                    code="sshfp_missing",
                 )
             ]
         return []

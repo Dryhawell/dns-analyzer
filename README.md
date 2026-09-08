@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.9.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.10.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV) are observations, not automatic proof of compromise.
 
@@ -14,7 +14,7 @@ DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 
 1. Validates and normalizes the input
 2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB, PTR)
-3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, optional DKIM / SRV)
+3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, optional DKIM / SRV)
 4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
 Three layers:
@@ -57,6 +57,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - TLS-RPT TXT at `_smtp._tls` (RFC 8460); SMTP is not probed
 - BIMI TXT at `default._bimi` (RFC 9091); logo and VMC URLs are not fetched
 - DANE TLSA at `_443._tcp` (RFC 6698); TLS is not probed
+- SSHFP at the hostname (RFC 4255); SSH is not probed
 - CAA inspection
 - HTTPS / SVCB (RFC 9460) — ALPN, port, ECH presence; not an HTTP scanner
 - Reverse DNS (`PTR`)
@@ -169,9 +170,9 @@ python main.py --version
 
 | Mode | What you get |
 | --- | --- |
-| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, findings, risk score |
+| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, findings, risk score |
 | `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
-| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB) |
+| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / SSHFP / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB) |
 | `--dkim SELECTOR` | TXT at `SELECTOR._domainkey.<domain>`. Repeatable (max 8). Never guessed |
 | `--srv SERVICE` | SRV at `_SERVICE._tcp.<domain>` (or `SERVICE/udp`). Repeatable (max 8). Never guessed |
 | `--record A --security` | That type plus the security sections |
@@ -181,7 +182,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.9.0` and exit |
+| `--version` | Print `dns-analyzer 1.10.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -293,7 +294,7 @@ JSON and CSV are for other programs, not for humans scraping the terminal. HTML 
 
 HTML uses inline CSS only: no JavaScript, no CDN. Record values are escaped (`&lt;script&gt;`) so a TXT string cannot inject markup.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi` and `tlsa` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
+JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi`, `tlsa` and `sshfp` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, including extra resolvers when comparison is on, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
@@ -398,6 +399,8 @@ Missing DMARC is an observation, not an automatic critical vulnerability. Multip
 
 **DANE / TLSA** (RFC 6698) publishes a certificate association in DNS so a TLS client can check a server certificate without (or in addition to) the public CA system. This tool only queries `_443._tcp.<domain>` (HTTPS, port 443). It does **not** open TCP/443, does not follow MX hosts, and does not compare the live certificate. Usage `3` (DANE-EE) plus selector `1` (SPKI) and matching `1` (SHA-256) is the usual “this key in DNS” shape. Missing TLSA is common; most sites still rely on CAs only. `--record TLSA` is rejected because TLSA is not at the apex.
 
+**SSHFP** (RFC 4255) publishes SSH host-key fingerprints at the hostname itself (`4 2 <sha256>` is Ed25519 + SHA-256). OpenSSH can use this with `VerifyHostKeyDNS` when DNSSEC validates. This tool only reads the DNS record. It does **not** open TCP/22 or compare live host keys. Missing SSHFP is common for names that are not SSH servers.
+
 ---
 
 ## SRV
@@ -446,7 +449,7 @@ dns-analyzer/
 │   ├── models.py                # DNSRecord, CoreLookup
 │   ├── reverse.py               # IP → PTR name
 │   ├── ttl.py                   # cache-lifetime wording
-│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py
+│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py / sshfp.py
 │   ├── security.py / risk.py
 │   ├── config.py / compare.py   # named resolvers, A/AAAA diff
 │   └── result.py                # one run, ready to export
@@ -468,7 +471,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, MTA-STS, TLS-RPT, BIMI, DANE TLSA, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -487,6 +490,7 @@ If a test needs the network, it does not belong in this suite.
 - TLS-RPT is DNS-only (`_smtp._tls` TXT); SMTP is not probed and HTTPS rua URLs are not fetched
 - BIMI is DNS-only (`default._bimi` TXT); only the default selector is queried; logo and VMC URLs are not fetched
 - DANE TLSA is DNS-only (`_443._tcp`); TLS is not probed and MX hosts are not followed
+- SSHFP is DNS-only (at the hostname); SSH is not probed
 - Documentation addresses (`192.0.2.0/24`, `2001:db8::/32`, …) are labeled, not scored as private LAN
 - The risk score is a local heuristic, not a security standard
 - Different answers from two resolvers are not proof of hijacking
@@ -503,7 +507,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.9.0** adds DANE TLSA DNS discovery. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.10.0** adds SSHFP DNS discovery. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

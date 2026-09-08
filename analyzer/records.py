@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 
 from analyzer.models import DNSRecord
+from analyzer.sshfp import algorithm_meaning, fingerprint_hex, fp_type_meaning
 from analyzer.tlsa import (
     association_hex,
     matching_meaning,
@@ -61,6 +62,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
     if rtype == "TLSA":
         return _format_tlsa(rdata)
 
+    if rtype == "SSHFP":
+        return _format_sshfp(rdata)
+
     if rtype in {"A", "AAAA"}:
         return canonicalize_ip(_text(rdata))
 
@@ -116,6 +120,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         return _svcb_details(rdata)
     if rtype == "TLSA":
         return _tlsa_details(rdata)
+    if rtype == "SSHFP":
+        return _sshfp_details(rdata)
     return ()
 
 
@@ -152,6 +158,27 @@ def _tlsa_details(rdata: object) -> tuple[tuple[str, str], ...]:
         ("Selector", f"{selector} — {selector_meaning(selector)}"),
         ("Matching", f"{matching_type} — {matching_meaning(matching_type)}"),
         ("Association", assoc),
+    ]
+    if truncated:
+        rows.append(("Truncated", "yes"))
+    return tuple(rows)
+
+
+def _format_sshfp(rdata: object) -> str:
+    algorithm = int(getattr(rdata, "algorithm", 0))
+    fp_type = int(getattr(rdata, "fp_type", 0))
+    fingerprint, _truncated = fingerprint_hex(getattr(rdata, "fingerprint", b""))
+    return f"{algorithm} {fp_type} {fingerprint}"
+
+
+def _sshfp_details(rdata: object) -> tuple[tuple[str, str], ...]:
+    algorithm = int(getattr(rdata, "algorithm", -1))
+    fp_type = int(getattr(rdata, "fp_type", -1))
+    fingerprint, truncated = fingerprint_hex(getattr(rdata, "fingerprint", b""))
+    rows: list[tuple[str, str]] = [
+        ("Algorithm", f"{algorithm} — {algorithm_meaning(algorithm)}"),
+        ("Fingerprint type", f"{fp_type} — {fp_type_meaning(fp_type)}"),
+        ("Fingerprint", fingerprint),
     ]
     if truncated:
         rows.append(("Truncated", "yes"))

@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from analyzer.bimi import BimiObservation
+from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
@@ -68,6 +69,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "tls_rpt": _tls_rpt_dict(result.tls_rpt),
         "bimi": _bimi_dict(result.bimi),
         "tlsa": _tlsa_dict(result.tlsa),
+        "sshfp": _sshfp_dict(result.sshfp),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -282,6 +284,29 @@ def _tlsa_dict(observation: TlsaObservation | None) -> dict[str, object] | None:
     }
 
 
+def _sshfp_fingerprint_dict(item: SshfpFingerprint) -> dict[str, object]:
+    return {
+        "algorithm": item.algorithm,
+        "fingerprint_type": item.fingerprint_type,
+        "fingerprint": item.fingerprint,
+        "fingerprint_truncated": item.fingerprint_truncated,
+        "algorithm_meaning": item.algorithm_meaning,
+        "fingerprint_type_meaning": item.fingerprint_type_meaning,
+    }
+
+
+def _sshfp_dict(observation: SshfpObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "records": [_sshfp_fingerprint_dict(item) for item in observation.fingerprints],
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -411,6 +436,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_bimi(result.bimi))
     if result.tlsa is not None:
         parts.extend(_html_tlsa(result.tlsa))
+    if result.sshfp is not None:
+        parts.extend(_html_sshfp(result.sshfp))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -614,6 +641,27 @@ def _html_tlsa(observation: TlsaObservation) -> list[str]:
         parts.append(f"<p>matching: {_e(item.matching_meaning)}</p>")
         if item.association_truncated:
             parts.append("<p class=\"note\">association hex truncated (full certificate not dumped)</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_sshfp(observation: SshfpObservation) -> list[str]:
+    parts = [
+        "<h2>SSHFP</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    for item in observation.fingerprints:
+        parts.append(
+            f"<p><code>{item.algorithm} {item.fingerprint_type} "
+            f"{_e(item.fingerprint)}</code></p>"
+        )
+        parts.append(f"<p>algorithm: {_e(item.algorithm_meaning)}</p>")
+        parts.append(f"<p>fingerprint type: {_e(item.fingerprint_type_meaning)}</p>")
+        if item.fingerprint_truncated:
+            parts.append("<p class=\"note\">fingerprint hex truncated</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

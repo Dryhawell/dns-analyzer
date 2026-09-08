@@ -11,6 +11,7 @@ from analyzer.dnssec import evaluate_dnssec
 from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.bimi import evaluate_bimi
+from analyzer.sshfp import evaluate_sshfp
 from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
 from analyzer.tlsrpt import evaluate_tls_rpt
@@ -112,6 +113,30 @@ def _tlsa(value: str | None = None) -> object:
     )
 
 
+def _sshfp(value: str | None = None) -> object:
+    qname = "example.com"
+    if value is None:
+        return evaluate_sshfp(qname, ())
+    parts = value.split()
+    fp = parts[2] if len(parts) > 2 else ""
+    return evaluate_sshfp(
+        qname,
+        [
+            DNSRecord(
+                "SSHFP",
+                qname,
+                value,
+                300,
+                details=(
+                    ("Algorithm", f"{parts[0]} — Ed25519"),
+                    ("Fingerprint type", f"{parts[1]} — SHA-256"),
+                    ("Fingerprint", fp),
+                ),
+            )
+        ],
+    )
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -121,6 +146,7 @@ def _bind(
     tlsrpt=None,
     bimi=None,
     tlsa=None,
+    sshfp=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -129,6 +155,7 @@ def _bind(
     mock_cls.return_value.inspect_tls_rpt.return_value = tlsrpt or _tlsrpt()
     mock_cls.return_value.inspect_bimi.return_value = bimi or _bimi()
     mock_cls.return_value.inspect_tlsa.return_value = tlsa or _tlsa()
+    mock_cls.return_value.inspect_sshfp.return_value = sshfp or _sshfp()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -450,6 +477,22 @@ def test_cli_prints_tlsa(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_sshfp(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        sshfp=_sshfp(f"4 2 {'ab' * 32}"),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "SSHFP" in output
+    assert "Status: FOUND" in output
+    assert "Ed25519" in output
+    mock_resolver_cls.return_value.inspect_sshfp.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -547,6 +590,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_tls_rpt.assert_not_called()
     mock_resolver_cls.return_value.inspect_bimi.assert_not_called()
     mock_resolver_cls.return_value.inspect_tlsa.assert_not_called()
+    mock_resolver_cls.return_value.inspect_sshfp.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -654,6 +698,13 @@ def test_cli_record_tlsa_hints_dane(capsys) -> None:
     err = capsys.readouterr().err
     assert "_443._tcp" in err
     assert "apex" in err.lower()
+
+
+def test_cli_record_sshfp_hints_security_view(capsys) -> None:
+    assert run(["example.com", "--record", "SSHFP"]) == 1
+    err = capsys.readouterr().err
+    assert "SSHFP" in err
+    assert "--security" in err or "security" in err.lower()
 
 
 def test_cli_rejects_all_with_record(capsys) -> None:
@@ -858,6 +909,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["tls_rpt"]["query_name"] == "_smtp._tls.example.com"
     assert data["bimi"]["query_name"] == "default._bimi.example.com"
     assert data["tlsa"]["query_name"] == "_443._tcp.example.com"
+    assert data["sshfp"]["query_name"] == "example.com"
 
 
 @patch("cli.interface.DNSResolver")

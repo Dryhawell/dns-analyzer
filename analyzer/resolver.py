@@ -31,6 +31,7 @@ from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts, mta_sts_policy_host, mta_sts_query_name
 from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
+from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa, tlsa_query_name
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt, tls_rpt_query_name
 
@@ -274,6 +275,20 @@ class DNSResolver:
 
     def resolve_tlsa(self, name: str) -> list[DNSRecord]:
         return self._query(name, "TLSA")
+
+    def inspect_sshfp(self, name: str) -> SshfpObservation:
+        """SSHFP lookup at <name>. Does not open SSH or compare live keys."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_sshfp(host)
+        except DomainNotFoundError:
+            return evaluate_sshfp(host, ())
+        except DNSQueryError as exc:
+            return evaluate_sshfp(host, (), error=str(exc))
+        return evaluate_sshfp(host, records)
+
+    def resolve_sshfp(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "SSHFP")
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

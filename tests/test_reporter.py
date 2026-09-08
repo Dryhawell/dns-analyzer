@@ -57,6 +57,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["tls_rpt"] is None
     assert payload["bimi"] is None
     assert payload["tlsa"] is None
+    assert payload["sshfp"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -365,6 +366,56 @@ def test_json_and_html_include_tlsa() -> None:
                             ("Selector", "1 — SPKI"),
                             ("Matching", "1 — SHA-256"),
                             ("Association", "<script>x</script>"),
+                        ),
+                    )
+                ],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_sshfp() -> None:
+    from analyzer.sshfp import evaluate_sshfp
+
+    observation = evaluate_sshfp(
+        "example.com",
+        [
+            DNSRecord(
+                "SSHFP",
+                "example.com",
+                "4 2 " + "ab" * 32,
+                300,
+                details=(
+                    ("Algorithm", "4 — Ed25519"),
+                    ("Fingerprint type", "2 — SHA-256"),
+                    ("Fingerprint", "ab" * 32),
+                ),
+            )
+        ],
+    )
+    result = _result(sshfp=observation)
+    payload = result_to_dict(result)
+    assert payload["sshfp"]["status"] == "FOUND"
+    assert payload["sshfp"]["records"][0]["algorithm"] == 4
+    page = dumps_html(result)
+    assert "SSHFP" in page
+    assert "Ed25519" in page
+    xss = dumps_html(
+        _result(
+            sshfp=evaluate_sshfp(
+                "example.com",
+                [
+                    DNSRecord(
+                        "SSHFP",
+                        "example.com",
+                        "4 2 <script>x</script>",
+                        300,
+                        details=(
+                            ("Algorithm", "4 — Ed25519"),
+                            ("Fingerprint type", "2 — SHA-256"),
+                            ("Fingerprint", "<script>x</script>"),
                         ),
                     )
                 ],

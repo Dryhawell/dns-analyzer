@@ -42,6 +42,7 @@ from analyzer.exceptions import (
     ResolverConfigError,
 )
 from analyzer.bimi import BimiObservation
+from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.mtasts import MtaStsObservation
@@ -89,12 +90,12 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, TLS-RPT, BIMI, DANE TLSA, or SRV is an observation, not proof of compromise.
+MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, or SRV is an observation, not proof of compromise.
 """
 
 
@@ -103,7 +104,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -162,13 +163,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Show only this record type (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB). "
             "Repeatable. Other types are not queried. A is always queried first "
             "so NXDOMAIN can abort. PTR is --reverse, not --record PTR. "
-            "SRV is --srv, not --record SRV. TLSA is DANE at _443._tcp, not --record TLSA."
+            "SRV is --srv, not --record SRV. TLSA is DANE at _443._tcp, not --record TLSA. "
+            "SSHFP is in the security view, not --record SSHFP."
         ),
     )
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -250,7 +252,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "TLSA"}:
+    if value in {"PTR", "SRV", "TLSA", "SSHFP"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -267,6 +269,11 @@ def _record_type_error(raw: str) -> str:
         return (
             "TLSA is not at the apex. Default / --security query "
             "_443._tcp.<domain> (DANE for HTTPS)."
+        )
+    if kind == "SSHFP":
+        return (
+            "SSHFP is queried at this hostname with default / --security. "
+            "It is not a --record dump type."
         )
     allowed = ", ".join(_RECORD_ORDER)
     return f"Unknown record type {raw!r}. Use one of: {allowed}."
@@ -624,6 +631,7 @@ def _print_lookup(
     tls_rpt: TlsRptObservation | None = None,
     bimi: BimiObservation | None = None,
     tlsa: TlsaObservation | None = None,
+    sshfp: SshfpObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -678,10 +686,11 @@ def _print_lookup(
             or tls_rpt is None
             or bimi is None
             or tlsa is None
+            or sshfp is None
             or security is None
         ):
             raise RuntimeError(
-                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA results."
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP results."
             )
         _print_dnssec(dnssec)
         _print_spf(spf)
@@ -690,6 +699,7 @@ def _print_lookup(
         _print_tls_rpt(tls_rpt)
         _print_bimi(bimi)
         _print_tlsa(tlsa)
+        _print_sshfp(sshfp)
         _print_security(security)
 
 
@@ -849,6 +859,27 @@ def _print_tlsa(observation: TlsaObservation) -> None:
             print(f"  matching: {item.matching_meaning}")
             if item.association_truncated:
                 print("  association hex truncated (full certificate not dumped)")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_sshfp(observation: SshfpObservation) -> None:
+    print("SSHFP")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.fingerprints:
+        for item in observation.fingerprints:
+            print(
+                f"{item.algorithm} {item.fingerprint_type} {item.fingerprint}"
+            )
+            print(f"  algorithm: {item.algorithm_meaning}")
+            print(f"  fingerprint type: {item.fingerprint_type_meaning}")
+            if item.fingerprint_truncated:
+                print("  fingerprint hex truncated")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1250,16 +1281,18 @@ def _run(argv: list[str] | None = None) -> int:
     tls_rpt = None
     bimi = None
     tlsa = None
+    sshfp = None
     try:
         if view.show_security:
-            workers = 6 + len(selectors) + len(srv_specs)
-            with ThreadPoolExecutor(max_workers=min(8, max(6, workers))) as pool:
+            workers = 7 + len(selectors) + len(srv_specs)
+            with ThreadPoolExecutor(max_workers=min(8, max(7, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
                 fut_mtasts = pool.submit(resolver.inspect_mta_sts, domain)
                 fut_tlsrpt = pool.submit(resolver.inspect_tls_rpt, domain)
                 fut_bimi = pool.submit(resolver.inspect_bimi, domain)
                 fut_tlsa = pool.submit(resolver.inspect_tlsa, domain)
+                fut_sshfp = pool.submit(resolver.inspect_sshfp, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1274,6 +1307,7 @@ def _run(argv: list[str] | None = None) -> int:
                 tls_rpt = fut_tlsrpt.result()
                 bimi = fut_bimi.result()
                 tlsa = fut_tlsa.result()
+                sshfp = fut_sshfp.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1291,6 +1325,7 @@ def _run(argv: list[str] | None = None) -> int:
                 tls_rpt,
                 bimi,
                 tlsa,
+                sshfp,
             )
         elif selectors or srv_specs:
             extra = len(selectors) + len(srv_specs)
@@ -1354,6 +1389,7 @@ def _run(argv: list[str] | None = None) -> int:
         tls_rpt=tls_rpt,
         bimi=bimi,
         tlsa=tlsa,
+        sshfp=sshfp,
         dkim=dkim_observations,
         srv=srv_observations,
         security=security,
@@ -1386,6 +1422,7 @@ def _run(argv: list[str] | None = None) -> int:
             tls_rpt,
             bimi,
             tlsa,
+            sshfp,
         )
         if comparison is not None:
             _print_comparison(comparison)
