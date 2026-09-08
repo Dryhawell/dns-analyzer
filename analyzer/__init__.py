@@ -21,6 +21,7 @@ from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.srv import SrvObservation, evaluate_srv
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts
+from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt
 from analyzer.validator import DomainValidationError, is_valid_domain, normalize_domain
 from analyzer.version import __version__
 
@@ -56,4 +57,6 @@ __all__ = [
     "evaluate_srv",
     "MtaStsObservation",
     "evaluate_mta_sts",
+    "TlsRptObservation",
+    "evaluate_tls_rpt",
 ]

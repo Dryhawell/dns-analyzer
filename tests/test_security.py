@@ -460,6 +460,46 @@ def test_mta_sts_found_with_id_adds_no_points() -> None:
     assert report.risk.value == 0
 
 
+def test_tls_rpt_missing_is_info_and_unscored() -> None:
+    from analyzer.risk import WEIGHTS
+    from analyzer.tlsrpt import evaluate_tls_rpt
+
+    observation = evaluate_tls_rpt("_smtp._tls.example.com", ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        tls_rpt=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "tlsrpt_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["tlsrpt_missing"] == 0
+    assert report.risk.value == 0
+
+
+def test_tls_rpt_found_with_rua_adds_no_points() -> None:
+    from analyzer.tlsrpt import evaluate_tls_rpt
+
+    observation = evaluate_tls_rpt(
+        "_smtp._tls.example.com",
+        [DNSRecord("TXT", "_smtp._tls.example.com", "v=TLSRPTv1; rua=mailto:tlsrpt@example.com", 300)],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        tls_rpt=observation,
+    )
+    assert not any(item.code.startswith("tlsrpt_") for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

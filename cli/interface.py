@@ -51,6 +51,7 @@ from analyzer.risk import RiskScore
 from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.srv import SrvObservation, SrvSpecError, normalize_srv_specs
+from analyzer.tlsrpt import TlsRptObservation
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
 from analyzer.version import __version__
@@ -86,12 +87,12 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, or SRV is an observation, not proof of compromise.
+MTA-STS, TLS-RPT, or SRV is an observation, not proof of compromise.
 """
 
 
@@ -100,7 +101,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -165,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -613,6 +614,7 @@ def _print_lookup(
     dkim: tuple[DkimObservation, ...] | None = None,
     srv: tuple[SrvObservation, ...] | None = None,
     mta_sts: MtaStsObservation | None = None,
+    tls_rpt: TlsRptObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -659,12 +661,20 @@ def _print_lookup(
         for item in srv:
             _print_srv(item)
     if view.show_security:
-        if dnssec is None or spf is None or dmarc is None or mta_sts is None or security is None:
-            raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC/MTA-STS results.")
+        if (
+            dnssec is None
+            or spf is None
+            or dmarc is None
+            or mta_sts is None
+            or tls_rpt is None
+            or security is None
+        ):
+            raise RuntimeError("Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT results.")
         _print_dnssec(dnssec)
         _print_spf(spf)
         _print_dmarc(dmarc)
         _print_mta_sts(mta_sts)
+        _print_tls_rpt(tls_rpt)
         _print_security(security)
 
 
@@ -756,6 +766,27 @@ def _print_mta_sts(observation: MtaStsObservation) -> None:
             print("id= (missing)")
         if observation.multiple_records:
             print("Note: multiple v=STSv1 TXT records (receivers may ignore the id).")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_tls_rpt(observation: TlsRptObservation) -> None:
+    print("TLS-RPT")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.record:
+        print("TXT:")
+        print(observation.record)
+        if observation.rua:
+            print(f"rua={observation.rua}")
+        else:
+            print("rua= (missing)")
+        if observation.multiple_records:
+            print("Note: multiple v=TLSRPTv1 TXT records (senders may ignore rua).")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1154,13 +1185,15 @@ def _run(argv: list[str] | None = None) -> int:
     dkim_observations = None
     srv_observations = None
     mta_sts = None
+    tls_rpt = None
     try:
         if view.show_security:
-            workers = 3 + len(selectors) + len(srv_specs)
-            with ThreadPoolExecutor(max_workers=min(8, max(3, workers))) as pool:
+            workers = 4 + len(selectors) + len(srv_specs)
+            with ThreadPoolExecutor(max_workers=min(8, max(4, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
                 fut_mtasts = pool.submit(resolver.inspect_mta_sts, domain)
+                fut_tlsrpt = pool.submit(resolver.inspect_tls_rpt, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1172,6 +1205,7 @@ def _run(argv: list[str] | None = None) -> int:
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
                 mta_sts = fut_mtasts.result()
+                tls_rpt = fut_tlsrpt.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1186,6 +1220,7 @@ def _run(argv: list[str] | None = None) -> int:
                 dkim_observations or (),
                 srv_observations or (),
                 mta_sts,
+                tls_rpt,
             )
         elif selectors or srv_specs:
             extra = len(selectors) + len(srv_specs)
@@ -1246,6 +1281,7 @@ def _run(argv: list[str] | None = None) -> int:
         spf=spf,
         dmarc=dmarc,
         mta_sts=mta_sts,
+        tls_rpt=tls_rpt,
         dkim=dkim_observations,
         srv=srv_observations,
         security=security,
@@ -1275,6 +1311,7 @@ def _run(argv: list[str] | None = None) -> int:
             dkim_observations,
             srv_observations,
             mta_sts,
+            tls_rpt,
         )
         if comparison is not None:
             _print_comparison(comparison)

@@ -25,6 +25,7 @@ from analyzer.dnssec import DnssecObservation, evaluate_dnssec
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts, mta_sts_policy_host, mta_sts_query_name
 from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
+from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt, tls_rpt_query_name
 
 from analyzer.exceptions import (
     DNSNetworkError,
@@ -230,6 +231,17 @@ class DNSResolver:
         except DNSQueryError as exc:
             return evaluate_mta_sts(qname, host, (), error=str(exc))
         return evaluate_mta_sts(qname, host, records)
+
+    def inspect_tls_rpt(self, name: str) -> TlsRptObservation:
+        """TXT lookup at _smtp._tls.<name>. Does not send SMTP or fetch rua URLs."""
+        qname = tls_rpt_query_name(name)
+        try:
+            records = self.resolve_txt(qname)
+        except DomainNotFoundError:
+            return evaluate_tls_rpt(qname, ())
+        except DNSQueryError as exc:
+            return evaluate_tls_rpt(qname, (), error=str(exc))
+        return evaluate_tls_rpt(qname, records)
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

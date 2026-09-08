@@ -18,6 +18,7 @@ from analyzer.records import describe_ip_scope
 from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
+from analyzer.tlsrpt import TlsRptObservation
 
 DISCLAIMER = (
     "Findings are configuration observations, not vulnerability scanner results. "
@@ -51,7 +52,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT observations."""
 
     def analyze(
         self,
@@ -62,6 +63,7 @@ class SecurityAnalyzer:
         dkim: Sequence[DkimObservation] = (),
         srv: Sequence[SrvObservation] = (),
         mta_sts: MtaStsObservation | None = None,
+        tls_rpt: TlsRptObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -71,6 +73,8 @@ class SecurityAnalyzer:
         findings.extend(self._srv(srv))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
+        if tls_rpt is not None:
+            findings.extend(self._tls_rpt(tls_rpt))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -426,6 +430,67 @@ class SecurityAnalyzer:
                     ),
                     recommendation="Add id= to the v=STSv1 TXT and bump it when the policy file changes.",
                     code="mtasts_id_missing",
+                )
+            )
+        return findings
+
+    def _tls_rpt(self, observation: TlsRptObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="TLS-RPT could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "report address, and it is not a compromise."
+                    ),
+                    recommendation="Retry the _smtp._tls lookup before treating TLS-RPT as unpublished.",
+                    code="tlsrpt_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="TLS-RPT TXT not published",
+                    description=(
+                        f"No v=TLSRPTv1 record at {observation.query_name}. "
+                        "Senders have no published address for SMTP TLS failure reports. "
+                        "This is common and is not proof that STARTTLS is unused."
+                    ),
+                    recommendation=(
+                        "If you operate inbound mail, publish v=TLSRPTv1; rua=mailto:... "
+                        "at _smtp._tls.<domain>. This tool does not send those reports."
+                    ),
+                    code="tlsrpt_missing",
+                )
+            ]
+        findings: list[SecurityFinding] = []
+        if observation.multiple_records:
+            findings.append(
+                SecurityFinding(
+                    severity="low",
+                    title="Multiple TLS-RPT TXT records",
+                    description=(
+                        "More than one v=TLSRPTv1 TXT was returned. Senders may "
+                        "ignore the report address."
+                    ),
+                    recommendation="Keep a single v=TLSRPTv1 record at _smtp._tls.<domain>.",
+                    code="tlsrpt_multiple",
+                )
+            )
+        if not observation.rua:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="TLS-RPT TXT has no rua=",
+                    description=(
+                        "RFC 8460 requires rua= (mailto: or https:) so senders know "
+                        "where to deliver TLS reports. Absence is a configuration "
+                        "signal, not a compromise."
+                    ),
+                    recommendation="Add rua=mailto:... or rua=https:... to the v=TLSRPTv1 TXT.",
+                    code="tlsrpt_rua_missing",
                 )
             )
         return findings

@@ -54,6 +54,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["dnssec"] is None
     assert payload["dmarc"] is None
     assert payload["mta_sts"] is None
+    assert payload["tls_rpt"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -257,6 +258,32 @@ def test_json_and_html_include_mta_sts() -> None:
                 "_mta-sts.example.com",
                 "mta-sts.example.com",
                 [DNSRecord("TXT", "_mta-sts.example.com", 'v=STSv1; id=<script>x</script>', 300)],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_tls_rpt() -> None:
+    from analyzer.tlsrpt import evaluate_tls_rpt
+
+    observation = evaluate_tls_rpt(
+        "_smtp._tls.example.com",
+        [DNSRecord("TXT", "_smtp._tls.example.com", "v=TLSRPTv1; rua=mailto:tlsrpt@example.com", 300)],
+    )
+    result = _result(tls_rpt=observation)
+    payload = result_to_dict(result)
+    assert payload["tls_rpt"]["status"] == "FOUND"
+    assert payload["tls_rpt"]["rua"] == "mailto:tlsrpt@example.com"
+    page = dumps_html(result)
+    assert "_smtp._tls.example.com" in page
+    assert "mailto:tlsrpt@example.com" in page
+    xss = dumps_html(
+        _result(
+            tls_rpt=evaluate_tls_rpt(
+                "_smtp._tls.example.com",
+                [DNSRecord("TXT", "_smtp._tls.example.com", "v=TLSRPTv1; rua=<script>x</script>", 300)],
             )
         )
     )

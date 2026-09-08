@@ -2,6 +2,21 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.7.0 — 2026-09-07
+
+TLS-RPT DNS discovery (RFC 8460). SMTP is not probed; HTTPS rua URLs are not fetched.
+
+### Added
+
+- Default / `--security` / `--all` query TXT at `_smtp._tls.<domain>` (`v=TLSRPTv1; rua=...`)
+- CLI/JSON/HTML show `rua=` (mailto: or https:)
+- Findings: `tlsrpt_missing` / `tlsrpt_unreadable` / `tlsrpt_rua_missing` are info (+0); multiple TXT is low (+5)
+
+### Notes
+
+- TLS-RPT is a report destination, not a TLS enforcement policy (that is MTA-STS)
+- Missing TLS-RPT is common and is not treated as a compromise
+
 ## 1.6.0 — 2026-09-07
 
 MTA-STS DNS discovery (RFC 8461). The HTTPS policy file is not fetched.

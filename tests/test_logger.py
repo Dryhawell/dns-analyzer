@@ -13,6 +13,7 @@ def _bind_lookup(mock_cls) -> None:
     from analyzer.dnssec import evaluate_dnssec
     from analyzer.models import CoreLookup
     from analyzer.mtasts import evaluate_mta_sts
+    from analyzer.tlsrpt import evaluate_tls_rpt
 
     mock_cls.return_value.lookup_core.return_value = CoreLookup(
         a=(DNSRecord("A", "example.com", "93.184.216.34", 60),),
@@ -32,6 +33,9 @@ def _bind_lookup(mock_cls) -> None:
     )
     mock_cls.return_value.inspect_mta_sts.return_value = evaluate_mta_sts(
         "_mta-sts.example.com", "mta-sts.example.com", ()
+    )
+    mock_cls.return_value.inspect_tls_rpt.return_value = evaluate_tls_rpt(
+        "_smtp._tls.example.com", ()
     )
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 

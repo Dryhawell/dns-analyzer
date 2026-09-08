@@ -17,6 +17,7 @@ from analyzer.mtasts import MtaStsObservation
 from analyzer.security import SecurityReport
 from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
+from analyzer.tlsrpt import TlsRptObservation
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class DNSAnalysisResult:
     spf: SpfObservation | None = None
     dmarc: DmarcObservation | None = None
     mta_sts: MtaStsObservation | None = None
+    tls_rpt: TlsRptObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     security: SecurityReport | None = None
