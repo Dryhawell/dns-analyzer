@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.12.0 — 2026-09-10
+
+MX host address lookup. SMTP is not probed.
+
+### Added
+
+- Default / `--security` / `--all` resolve A/AAAA for up to 8 MX targets
+- CLI/JSON/HTML show `RESOLVES` / `NO ADDRESS` / `NXDOMAIN` / `UNREADABLE` / `NULL MX`
+- Findings: `mx_unreadable` / `mx_host_unreadable` / `mx_host_nxdomain` / `mx_host_no_address` are info (+0)
+
+### Notes
+
+- MX names a host; this tool does not open TCP/25
+- Missing MX is common for names that are not mail domains
+- RFC 7505 null MX (`.`) is not treated as a missing address
+
 ## 1.11.0 — 2026-09-08
 
 Forward-confirmed reverse DNS (FCrDNS). The IP is not contacted.

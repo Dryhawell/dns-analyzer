@@ -2,6 +2,7 @@
 
 from analyzer.bimi import BimiObservation, evaluate_bimi
 from analyzer.fcrdns import FcrdnsObservation, evaluate_fcrdns
+from analyzer.mx import MxHostObservation, evaluate_mx_hosts
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa
 from analyzer.dmarc import DmarcObservation, evaluate_dmarc
@@ -71,4 +72,6 @@ __all__ = [
     "evaluate_sshfp",
     "FcrdnsObservation",
     "evaluate_fcrdns",
+    "MxHostObservation",
+    "evaluate_mx_hosts",
 ]

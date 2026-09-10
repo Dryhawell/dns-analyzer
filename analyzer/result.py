@@ -19,6 +19,7 @@ from analyzer.security import SecurityReport
 from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.fcrdns import FcrdnsObservation
+from analyzer.mx import MxHostObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -43,6 +44,7 @@ class DNSAnalysisResult:
     tlsa: TlsaObservation | None = None
     sshfp: SshfpObservation | None = None
     fcrdns: FcrdnsObservation | None = None
+    mx_hosts: MxHostObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     security: SecurityReport | None = None

@@ -32,6 +32,14 @@ from analyzer.fcrdns import (
     FcrdnsObservation,
     evaluate_fcrdns,
 )
+from analyzer.mx import (
+    MAX_HOSTS,
+    MxHostCheck,
+    MxHostObservation,
+    evaluate_mx_hosts,
+    mx_host_name,
+    unique_mx_hosts,
+)
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
@@ -373,6 +381,80 @@ class DNSResolver:
             forward_ips=forward_ips,
             status="MISMATCH",
         )
+
+    def inspect_mx_hosts(self, name: str) -> MxHostObservation:
+        """A/AAAA of each MX target. Does not open SMTP or contact the host."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_mx(host)
+        except DomainNotFoundError:
+            return evaluate_mx_hosts(host, ())
+        except DNSQueryError as exc:
+            return evaluate_mx_hosts(host, (), error=str(exc))
+        targets = unique_mx_hosts(records)
+        truncated = len(targets) > MAX_HOSTS
+        checks = tuple(
+            self._mx_host_check(target, preference)
+            for target, preference in targets[:MAX_HOSTS]
+        )
+        return evaluate_mx_hosts(host, checks, truncated=truncated)
+
+    def _mx_host_check(self, host: str, preference: int | None) -> MxHostCheck:
+        if mx_host_name(host) == ".":
+            return MxHostCheck(
+                host=".",
+                preference=preference,
+                ipv4=(),
+                ipv6=(),
+                status="NULL MX",
+            )
+        ipv4, err4, nx4 = self._lookup_host_ips(host, "A")
+        ipv6, err6, nx6 = self._lookup_host_ips(host, "AAAA")
+        if ipv4 or ipv6:
+            return MxHostCheck(
+                host=host,
+                preference=preference,
+                ipv4=ipv4,
+                ipv6=ipv6,
+                status="RESOLVES",
+            )
+        errors = [item for item in (err4, err6) if item]
+        if errors:
+            return MxHostCheck(
+                host=host,
+                preference=preference,
+                ipv4=(),
+                ipv6=(),
+                status="UNREADABLE",
+                error="; ".join(errors),
+            )
+        if nx4 or nx6:
+            return MxHostCheck(
+                host=host,
+                preference=preference,
+                ipv4=(),
+                ipv6=(),
+                status="NXDOMAIN",
+            )
+        return MxHostCheck(
+            host=host,
+            preference=preference,
+            ipv4=(),
+            ipv6=(),
+            status="NO ADDRESS",
+        )
+
+    def _lookup_host_ips(
+        self, host: str, rdtype: str
+    ) -> tuple[tuple[str, ...], str | None, bool]:
+        try:
+            answers = self.resolve_a(host) if rdtype == "A" else self.resolve_aaaa(host)
+        except DomainNotFoundError:
+            return (), None, True
+        except DNSQueryError as exc:
+            return (), str(exc), False
+        ips = tuple(dict.fromkeys(canonicalize_ip(record.value) for record in answers))
+        return ips, None, False
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

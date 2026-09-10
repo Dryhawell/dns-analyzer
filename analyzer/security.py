@@ -20,6 +20,7 @@ from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.fcrdns import FcrdnsObservation
+from analyzer.mx import MxHostObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -56,7 +57,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host observations."""
 
     def analyze(
         self,
@@ -72,6 +73,7 @@ class SecurityAnalyzer:
         tlsa: TlsaObservation | None = None,
         sshfp: SshfpObservation | None = None,
         fcrdns: FcrdnsObservation | None = None,
+        mx_hosts: MxHostObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -91,6 +93,8 @@ class SecurityAnalyzer:
             findings.extend(self._sshfp(sshfp))
         if fcrdns is not None:
             findings.extend(self._fcrdns(fcrdns))
+        if mx_hosts is not None:
+            findings.extend(self._mx_hosts(mx_hosts))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -706,6 +710,74 @@ class SecurityAnalyzer:
                     ),
                     recommendation="Compare PTR and A/AAAA only if you expect them to match.",
                     code="fcrdns_mismatch",
+                )
+            )
+        return findings
+
+    def _mx_hosts(self, observation: MxHostObservation) -> list[SecurityFinding]:
+        if observation.status == "UNREADABLE":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="MX hosts could not be read",
+                    description=(
+                        "The MX lookup timed out or failed. A timeout is not a missing "
+                        "mail host, and it is not a compromise."
+                    ),
+                    recommendation="Retry the MX lookup before treating mail routing as unpublished.",
+                    code="mx_unreadable",
+                )
+            ]
+        findings: list[SecurityFinding] = []
+        unread = [item.host for item in observation.checks if item.status == "UNREADABLE"]
+        missing = [item.host for item in observation.checks if item.status == "NXDOMAIN"]
+        empty = [item.host for item in observation.checks if item.status == "NO ADDRESS"]
+        if unread:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="Some MX hosts could not be read",
+                    description=(
+                        "A/AAAA lookup timed out for: "
+                        + ", ".join(unread)
+                        + ". A timeout is not a missing address, and it is not a compromise."
+                    ),
+                    recommendation="Retry the host lookup before treating the MX target as unpublished.",
+                    code="mx_host_unreadable",
+                )
+            )
+        if missing:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="MX target does not exist",
+                    description=(
+                        "MX points at a name that returned NXDOMAIN: "
+                        + ", ".join(missing)
+                        + ". Mail to this name may bounce. This is not proof of hijacking."
+                    ),
+                    recommendation=(
+                        "If you operate the zone, point MX at a host that exists. "
+                        "This tool does not speak SMTP."
+                    ),
+                    code="mx_host_nxdomain",
+                )
+            )
+        if empty:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="MX target has no A/AAAA",
+                    description=(
+                        "MX points at a name with no A or AAAA: "
+                        + ", ".join(empty)
+                        + ". Delivery needs an address. This is not a compromise."
+                    ),
+                    recommendation=(
+                        "Publish A/AAAA for the mail host, or change MX. "
+                        "This tool does not open port 25."
+                    ),
+                    code="mx_host_no_address",
                 )
             )
         return findings

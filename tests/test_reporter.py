@@ -59,6 +59,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["tlsa"] is None
     assert payload["sshfp"] is None
     assert payload["fcrdns"] is None
+    assert payload["mx_hosts"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -459,6 +460,48 @@ def test_json_and_html_include_fcrdns() -> None:
                         status="NO PTR",
                     )
                 ]
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_mx_hosts() -> None:
+    from analyzer.mx import MxHostCheck, evaluate_mx_hosts
+
+    observation = evaluate_mx_hosts(
+        "example.com",
+        [
+            MxHostCheck(
+                host="mail.example.com",
+                preference=10,
+                ipv4=("192.0.2.10",),
+                ipv6=(),
+                status="RESOLVES",
+            )
+        ],
+    )
+    result = _result(mx_hosts=observation)
+    payload = result_to_dict(result)
+    assert payload["mx_hosts"]["status"] == "FOUND"
+    assert payload["mx_hosts"]["checks"][0]["host"] == "mail.example.com"
+    page = dumps_html(result)
+    assert "MX hosts" in page
+    assert "RESOLVES" in page
+    xss = dumps_html(
+        _result(
+            mx_hosts=evaluate_mx_hosts(
+                "example.com",
+                [
+                    MxHostCheck(
+                        host="<script>x</script>",
+                        preference=10,
+                        ipv4=(),
+                        ipv6=(),
+                        status="NXDOMAIN",
+                    )
+                ],
             )
         )
     )
