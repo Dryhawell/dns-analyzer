@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.13.0 — 2026-09-11
+
+NS host address lookup. Zone transfer is not attempted.
+
+### Added
+
+- Default / `--security` / `--all` resolve A/AAAA for up to 8 NS targets
+- CLI/JSON/HTML show `RESOLVES` / `NO ADDRESS` / `NXDOMAIN` / `UNREADABLE` and in-bailiwick vs out-of-bailiwick
+- Findings: `ns_unreadable` / `ns_host_unreadable` / `ns_host_nxdomain` / `ns_host_no_address` are info (+0)
+
+### Notes
+
+- NS names a host; this tool does not open TCP/53 to the NS or attempt AXFR
+- Missing NS is common on subdomains; the parent holds the delegation
+- A missing address is not treated as lame-server proof
+
 ## 1.12.0 — 2026-09-10
 
 MX host address lookup. SMTP is not probed.

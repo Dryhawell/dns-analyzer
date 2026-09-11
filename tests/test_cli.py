@@ -13,6 +13,7 @@ from analyzer.models import CoreLookup, DNSRecord
 from analyzer.bimi import evaluate_bimi
 from analyzer.fcrdns import FcrdnsCheck, evaluate_fcrdns
 from analyzer.mx import evaluate_mx_hosts
+from analyzer.ns import evaluate_ns_hosts
 from analyzer.sshfp import evaluate_sshfp
 from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
@@ -147,6 +148,10 @@ def _mx_hosts(*checks) -> object:
     return evaluate_mx_hosts("example.com", checks)
 
 
+def _ns_hosts(*checks) -> object:
+    return evaluate_ns_hosts("example.com", checks)
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -159,6 +164,7 @@ def _bind(
     sshfp=None,
     fcrdns=None,
     mx_hosts=None,
+    ns_hosts=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -170,6 +176,7 @@ def _bind(
     mock_cls.return_value.inspect_sshfp.return_value = sshfp or _sshfp()
     mock_cls.return_value.inspect_fcrdns.return_value = fcrdns or _fcrdns()
     mock_cls.return_value.inspect_mx_hosts.return_value = mx_hosts or _mx_hosts()
+    mock_cls.return_value.inspect_ns_hosts.return_value = ns_hosts or _ns_hosts()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -556,6 +563,33 @@ def test_cli_prints_mx_hosts(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_ns_hosts(mock_resolver_cls, capsys) -> None:
+    from analyzer.ns import NsHostCheck
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        ns_hosts=_ns_hosts(
+            NsHostCheck(
+                host="ns1.example.com",
+                in_bailiwick=True,
+                ipv4=("192.0.2.53",),
+                ipv6=(),
+                status="RESOLVES",
+            )
+        ),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "NS HOSTS" in output
+    assert "Status: RESOLVES" in output
+    assert "in-bailiwick" in output
+    assert "ns1.example.com" in output
+    mock_resolver_cls.return_value.inspect_ns_hosts.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -656,6 +690,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_sshfp.assert_not_called()
     mock_resolver_cls.return_value.inspect_fcrdns.assert_not_called()
     mock_resolver_cls.return_value.inspect_mx_hosts.assert_not_called()
+    mock_resolver_cls.return_value.inspect_ns_hosts.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -977,6 +1012,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["sshfp"]["query_name"] == "example.com"
     assert data["fcrdns"]["checks"] == []
     assert data["mx_hosts"]["checks"] == []
+    assert data["ns_hosts"]["checks"] == []
 
 
 @patch("cli.interface.DNSResolver")

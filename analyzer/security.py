@@ -21,6 +21,7 @@ from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
+from analyzer.ns import NsHostObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -57,7 +58,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host observations."""
 
     def analyze(
         self,
@@ -74,6 +75,7 @@ class SecurityAnalyzer:
         sshfp: SshfpObservation | None = None,
         fcrdns: FcrdnsObservation | None = None,
         mx_hosts: MxHostObservation | None = None,
+        ns_hosts: NsHostObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -95,6 +97,8 @@ class SecurityAnalyzer:
             findings.extend(self._fcrdns(fcrdns))
         if mx_hosts is not None:
             findings.extend(self._mx_hosts(mx_hosts))
+        if ns_hosts is not None:
+            findings.extend(self._ns_hosts(ns_hosts))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         findings.extend(self._cname(lookup))
@@ -778,6 +782,76 @@ class SecurityAnalyzer:
                         "This tool does not open port 25."
                     ),
                     code="mx_host_no_address",
+                )
+            )
+        return findings
+
+    def _ns_hosts(self, observation: NsHostObservation) -> list[SecurityFinding]:
+        if observation.status == "UNREADABLE":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="NS hosts could not be read",
+                    description=(
+                        "The NS lookup timed out or failed. A timeout is not a missing "
+                        "nameserver, and it is not a compromise."
+                    ),
+                    recommendation="Retry the NS lookup before treating delegation as unpublished.",
+                    code="ns_unreadable",
+                )
+            ]
+        findings: list[SecurityFinding] = []
+        unread = [item.host for item in observation.checks if item.status == "UNREADABLE"]
+        missing = [item.host for item in observation.checks if item.status == "NXDOMAIN"]
+        empty = [item.host for item in observation.checks if item.status == "NO ADDRESS"]
+        if unread:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="Some NS hosts could not be read",
+                    description=(
+                        "A/AAAA lookup timed out for: "
+                        + ", ".join(unread)
+                        + ". A timeout is not a missing address, and it is not a compromise."
+                    ),
+                    recommendation="Retry the host lookup before treating the NS target as unpublished.",
+                    code="ns_host_unreadable",
+                )
+            )
+        if missing:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="NS target does not exist",
+                    description=(
+                        "NS points at a name that returned NXDOMAIN: "
+                        + ", ".join(missing)
+                        + ". Resolvers may fail to reach this zone. This is not proof of hijacking, "
+                        "and this tool does not test lame delegation."
+                    ),
+                    recommendation=(
+                        "If you operate the zone, point NS at a host that exists. "
+                        "This tool does not attempt AXFR."
+                    ),
+                    code="ns_host_nxdomain",
+                )
+            )
+        if empty:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="NS target has no A/AAAA",
+                    description=(
+                        "NS points at a name with no A or AAAA: "
+                        + ", ".join(empty)
+                        + ". In-bailiwick names need glue at the parent; this recursive "
+                        "lookup may still miss glue. This is not a compromise."
+                    ),
+                    recommendation=(
+                        "Publish A/AAAA for the nameserver, or change NS. "
+                        "This tool does not open port 53 to the NS."
+                    ),
+                    code="ns_host_no_address",
                 )
             )
         return findings

@@ -846,6 +846,96 @@ def test_mx_host_resolves_adds_no_points() -> None:
     assert report.risk.value == 0
 
 
+def test_ns_host_nxdomain_is_info_and_unscored() -> None:
+    from analyzer.ns import NsHostCheck, evaluate_ns_hosts
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_ns_hosts(
+        "example.com",
+        [
+            NsHostCheck(
+                host="gone.example.net",
+                in_bailiwick=False,
+                ipv4=(),
+                ipv6=(),
+                status="NXDOMAIN",
+            )
+        ],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        ns_hosts=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "ns_host_nxdomain")
+    assert missing.severity == "info"
+    assert WEIGHTS["ns_host_nxdomain"] == 0
+    assert report.risk.value == 0
+
+
+def test_ns_host_no_address_is_info_and_unscored() -> None:
+    from analyzer.ns import NsHostCheck, evaluate_ns_hosts
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_ns_hosts(
+        "example.com",
+        [
+            NsHostCheck(
+                host="ns1.example.com",
+                in_bailiwick=True,
+                ipv4=(),
+                ipv6=(),
+                status="NO ADDRESS",
+            )
+        ],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        ns_hosts=observation,
+    )
+    empty = next(item for item in report.findings if item.code == "ns_host_no_address")
+    assert empty.severity == "info"
+    assert WEIGHTS["ns_host_no_address"] == 0
+    assert report.risk.value == 0
+
+
+def test_ns_host_resolves_adds_no_points() -> None:
+    from analyzer.ns import NsHostCheck, evaluate_ns_hosts
+
+    observation = evaluate_ns_hosts(
+        "example.com",
+        [
+            NsHostCheck(
+                host="ns1.example.com",
+                in_bailiwick=True,
+                ipv4=("192.0.2.53",),
+                ipv6=(),
+                status="RESOLVES",
+            )
+        ],
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        ns_hosts=observation,
+    )
+    assert not any(item.code.startswith("ns_") for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

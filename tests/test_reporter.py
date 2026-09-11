@@ -60,6 +60,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["sshfp"] is None
     assert payload["fcrdns"] is None
     assert payload["mx_hosts"] is None
+    assert payload["ns_hosts"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -497,6 +498,48 @@ def test_json_and_html_include_mx_hosts() -> None:
                     MxHostCheck(
                         host="<script>x</script>",
                         preference=10,
+                        ipv4=(),
+                        ipv6=(),
+                        status="NXDOMAIN",
+                    )
+                ],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_ns_hosts() -> None:
+    from analyzer.ns import NsHostCheck, evaluate_ns_hosts
+
+    observation = evaluate_ns_hosts(
+        "example.com",
+        [
+            NsHostCheck(
+                host="ns1.example.com",
+                in_bailiwick=True,
+                ipv4=("192.0.2.53",),
+                ipv6=(),
+                status="RESOLVES",
+            )
+        ],
+    )
+    result = _result(ns_hosts=observation)
+    payload = result_to_dict(result)
+    assert payload["ns_hosts"]["status"] == "FOUND"
+    assert payload["ns_hosts"]["checks"][0]["in_bailiwick"] is True
+    page = dumps_html(result)
+    assert "NS hosts" in page
+    assert "in-bailiwick" in page
+    xss = dumps_html(
+        _result(
+            ns_hosts=evaluate_ns_hosts(
+                "example.com",
+                [
+                    NsHostCheck(
+                        host="<script>x</script>",
+                        in_bailiwick=False,
                         ipv4=(),
                         ipv6=(),
                         status="NXDOMAIN",

@@ -40,6 +40,14 @@ from analyzer.mx import (
     mx_host_name,
     unique_mx_hosts,
 )
+from analyzer.ns import (
+    MAX_HOSTS as MAX_NS_HOSTS,
+    NsHostCheck,
+    NsHostObservation,
+    evaluate_ns_hosts,
+    ns_in_bailiwick,
+    unique_ns_hosts,
+)
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
@@ -439,6 +447,60 @@ class DNSResolver:
         return MxHostCheck(
             host=host,
             preference=preference,
+            ipv4=(),
+            ipv6=(),
+            status="NO ADDRESS",
+        )
+
+    def inspect_ns_hosts(self, name: str) -> NsHostObservation:
+        """A/AAAA of each NS target. Does not AXFR or contact the nameserver."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_ns(host)
+        except DomainNotFoundError:
+            return evaluate_ns_hosts(host, ())
+        except DNSQueryError as exc:
+            return evaluate_ns_hosts(host, (), error=str(exc))
+        targets = unique_ns_hosts(records)
+        truncated = len(targets) > MAX_NS_HOSTS
+        checks = tuple(
+            self._ns_host_check(host, target) for target in targets[:MAX_NS_HOSTS]
+        )
+        return evaluate_ns_hosts(host, checks, truncated=truncated)
+
+    def _ns_host_check(self, zone: str, ns_host: str) -> NsHostCheck:
+        bailiwick = ns_in_bailiwick(zone, ns_host)
+        ipv4, err4, nx4 = self._lookup_host_ips(ns_host, "A")
+        ipv6, err6, nx6 = self._lookup_host_ips(ns_host, "AAAA")
+        if ipv4 or ipv6:
+            return NsHostCheck(
+                host=ns_host,
+                in_bailiwick=bailiwick,
+                ipv4=ipv4,
+                ipv6=ipv6,
+                status="RESOLVES",
+            )
+        errors = [item for item in (err4, err6) if item]
+        if errors:
+            return NsHostCheck(
+                host=ns_host,
+                in_bailiwick=bailiwick,
+                ipv4=(),
+                ipv6=(),
+                status="UNREADABLE",
+                error="; ".join(errors),
+            )
+        if nx4 or nx6:
+            return NsHostCheck(
+                host=ns_host,
+                in_bailiwick=bailiwick,
+                ipv4=(),
+                ipv6=(),
+                status="NXDOMAIN",
+            )
+        return NsHostCheck(
+            host=ns_host,
+            in_bailiwick=bailiwick,
             ipv4=(),
             ipv6=(),
             status="NO ADDRESS",

@@ -16,6 +16,7 @@ from pathlib import Path
 from analyzer.bimi import BimiObservation
 from analyzer.fcrdns import FcrdnsCheck, FcrdnsObservation
 from analyzer.mx import MxHostCheck, MxHostObservation
+from analyzer.ns import NsHostCheck, NsHostObservation
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -74,6 +75,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "sshfp": _sshfp_dict(result.sshfp),
         "fcrdns": _fcrdns_dict(result.fcrdns),
         "mx_hosts": _mx_hosts_dict(result.mx_hosts),
+        "ns_hosts": _ns_hosts_dict(result.ns_hosts),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -356,6 +358,30 @@ def _mx_hosts_dict(observation: MxHostObservation | None) -> dict[str, object] |
     }
 
 
+def _ns_host_check_dict(item: NsHostCheck) -> dict[str, object]:
+    return {
+        "host": item.host,
+        "in_bailiwick": item.in_bailiwick,
+        "ipv4": list(item.ipv4),
+        "ipv6": list(item.ipv6),
+        "status": item.status,
+        "error": item.error,
+    }
+
+
+def _ns_hosts_dict(observation: NsHostObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "checks": [_ns_host_check_dict(item) for item in observation.checks],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -491,6 +517,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_fcrdns(result.fcrdns))
     if result.mx_hosts is not None:
         parts.extend(_html_mx_hosts(result.mx_hosts))
+    if result.ns_hosts is not None:
+        parts.extend(_html_ns_hosts(result.ns_hosts))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -763,6 +791,33 @@ def _html_mx_hosts(observation: MxHostObservation) -> list[str]:
             parts.append(f"<p class=\"note\">{_e(item.error)}</p>")
     if observation.truncated:
         parts.append("<p class=\"note\">More than 8 MX hosts; extra targets were not checked.</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_ns_hosts(observation: NsHostObservation) -> list[str]:
+    parts = [
+        "<h2>NS hosts</h2>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No NS records at this name.</p>")
+    for item in observation.checks:
+        scope = "in-bailiwick" if item.in_bailiwick else "out-of-bailiwick"
+        parts.append(
+            f"<p><code>{_e(item.host)}</code> {_e(scope)} — "
+            f"<strong>{_e(item.status)}</strong></p>"
+        )
+        if item.ipv4:
+            parts.append(f"<p>A: <code>{_e(', '.join(item.ipv4))}</code></p>")
+        if item.ipv6:
+            parts.append(f"<p>AAAA: <code>{_e(', '.join(item.ipv6))}</code></p>")
+        if item.error:
+            parts.append(f"<p class=\"note\">{_e(item.error)}</p>")
+    if observation.truncated:
+        parts.append("<p class=\"note\">More than 8 NS hosts; extra targets were not checked.</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
