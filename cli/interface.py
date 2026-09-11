@@ -45,6 +45,7 @@ from analyzer.bimi import BimiObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
+from analyzer.cname import CnameTargetObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.models import CoreLookup, DNSRecord
@@ -93,13 +94,13 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
 MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, or SRV is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues are also observations, not hijacking.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues are also observations, not hijacking.
 """
 
 
@@ -108,7 +109,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/CNAME targets/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -174,7 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -639,6 +640,7 @@ def _print_lookup(
     fcrdns: FcrdnsObservation | None = None,
     mx_hosts: MxHostObservation | None = None,
     ns_hosts: NsHostObservation | None = None,
+    cname_targets: CnameTargetObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -697,10 +699,11 @@ def _print_lookup(
             or fcrdns is None
             or mx_hosts is None
             or ns_hosts is None
+            or cname_targets is None
             or security is None
         ):
             raise RuntimeError(
-                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host results."
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target results."
             )
         _print_dnssec(dnssec)
         _print_spf(spf)
@@ -713,6 +716,7 @@ def _print_lookup(
         _print_fcrdns(fcrdns)
         _print_mx_hosts(mx_hosts)
         _print_ns_hosts(ns_hosts)
+        _print_cname_targets(cname_targets)
         _print_security(security)
 
 
@@ -965,6 +969,32 @@ def _print_ns_hosts(observation: NsHostObservation) -> None:
             print(f"  Note: {item.error}")
     if observation.truncated:
         print("Note: more than 8 NS hosts; extra targets were not checked.")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_cname_targets(observation: CnameTargetObservation) -> None:
+    print("CNAME TARGETS")
+    print("────────────────────────")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No CNAME records at this name.")
+    for item in observation.checks:
+        print(item.target)
+        print(f"  Status: {item.status}")
+        if item.chain:
+            print(f"  Chain: {' -> '.join(item.chain)}")
+        if item.ipv4:
+            print(f"  A: {', '.join(item.ipv4)}")
+        if item.ipv6:
+            print(f"  AAAA: {', '.join(item.ipv6)}")
+        if item.error:
+            print(f"  Note: {item.error}")
+    if observation.truncated:
+        print("Note: more than 8 CNAME targets; extra aliases were not checked.")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1370,6 +1400,7 @@ def _run(argv: list[str] | None = None) -> int:
     fcrdns = None
     mx_hosts = None
     ns_hosts = None
+    cname_targets = None
     try:
         if view.show_security:
             workers = 8 + len(selectors) + len(srv_specs)
@@ -1384,6 +1415,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_fcrdns = pool.submit(resolver.inspect_fcrdns, lookup)
                 fut_mx_hosts = pool.submit(resolver.inspect_mx_hosts, domain)
                 fut_ns_hosts = pool.submit(resolver.inspect_ns_hosts, domain)
+                fut_cname_targets = pool.submit(resolver.inspect_cname_targets, lookup)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1402,6 +1434,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fcrdns = fut_fcrdns.result()
                 mx_hosts = fut_mx_hosts.result()
                 ns_hosts = fut_ns_hosts.result()
+                cname_targets = fut_cname_targets.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1423,6 +1456,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fcrdns,
                 mx_hosts,
                 ns_hosts,
+                cname_targets,
             )
         elif selectors or srv_specs:
             extra = len(selectors) + len(srv_specs)
@@ -1490,6 +1524,7 @@ def _run(argv: list[str] | None = None) -> int:
         fcrdns=fcrdns,
         mx_hosts=mx_hosts,
         ns_hosts=ns_hosts,
+        cname_targets=cname_targets,
         dkim=dkim_observations,
         srv=srv_observations,
         security=security,
@@ -1526,6 +1561,7 @@ def _run(argv: list[str] | None = None) -> int:
             fcrdns,
             mx_hosts,
             ns_hosts,
+            cname_targets,
         )
         if comparison is not None:
             _print_comparison(comparison)

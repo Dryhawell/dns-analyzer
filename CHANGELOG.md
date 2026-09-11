@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.14.0 — 2026-09-11
+
+CNAME target address lookup. HTTP is not fetched.
+
+### Added
+
+- Default / `--security` / `--all` follow up to 8 CNAME targets (max 5 hops) and resolve A/AAAA
+- CLI/JSON/HTML show `RESOLVES` / `NO ADDRESS` / `NXDOMAIN` / `UNREADABLE` / `LOOP` / `TOO DEEP`
+- Findings: `cname_target_*` are info (+0) and are not treated as takeover
+
+### Notes
+
+- CNAME names another host; this tool does not fetch HTTP
+- Apex names often have no CNAME
+- When this check runs, the older `cname_dangling` heuristic is not also applied
+
 ## 1.13.0 — 2026-09-11
 
 NS host address lookup. Zone transfer is not attempted.

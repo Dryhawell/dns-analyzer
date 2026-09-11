@@ -936,6 +936,74 @@ def test_ns_host_resolves_adds_no_points() -> None:
     assert report.risk.value == 0
 
 
+def test_cname_target_nxdomain_is_info_and_unscored() -> None:
+    from analyzer.cname import CnameTargetCheck, evaluate_cname_targets
+    from analyzer.risk import WEIGHTS
+
+    lookup = _lookup(
+        cname=[DNSRecord("CNAME", "www.example.com", "gone.example.net", 300)],
+        txt=[DNSRecord("TXT", "www.example.com", "v=spf1 -all", 300)],
+        caa=[DNSRecord("CAA", "www.example.com", '0 issue "letsencrypt.org"', 3600)],
+    )
+    observation = evaluate_cname_targets(
+        [
+            CnameTargetCheck(
+                target="gone.example.net",
+                chain=("gone.example.net",),
+                ipv4=(),
+                ipv6=(),
+                status="NXDOMAIN",
+            )
+        ]
+    )
+    report = SecurityAnalyzer().analyze(
+        lookup,
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(lookup.txt),
+        evaluate_dmarc("_dmarc.www.example.com", [
+            DNSRecord("TXT", "_dmarc.www.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        cname_targets=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "cname_target_nxdomain")
+    assert missing.severity == "info"
+    assert WEIGHTS["cname_target_nxdomain"] == 0
+    assert not any(item.code == "cname_dangling" for item in report.findings)
+    assert report.risk.value == 0
+
+
+def test_cname_target_resolves_skips_legacy_dangling() -> None:
+    from analyzer.cname import CnameTargetCheck, evaluate_cname_targets
+
+    lookup = _lookup(
+        cname=[DNSRecord("CNAME", "www.example.com", "cdn.example.net", 300)],
+        txt=[DNSRecord("TXT", "www.example.com", "v=spf1 -all", 300)],
+        caa=[DNSRecord("CAA", "www.example.com", '0 issue "letsencrypt.org"', 3600)],
+    )
+    observation = evaluate_cname_targets(
+        [
+            CnameTargetCheck(
+                target="cdn.example.net",
+                chain=("cdn.example.net",),
+                ipv4=("192.0.2.10",),
+                ipv6=(),
+                status="RESOLVES",
+            )
+        ]
+    )
+    report = SecurityAnalyzer().analyze(
+        lookup,
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(lookup.txt),
+        evaluate_dmarc("_dmarc.www.example.com", [
+            DNSRecord("TXT", "_dmarc.www.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        cname_targets=observation,
+    )
+    assert not any(item.code.startswith("cname_") for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

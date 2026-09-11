@@ -14,6 +14,7 @@ from analyzer.bimi import evaluate_bimi
 from analyzer.fcrdns import FcrdnsCheck, evaluate_fcrdns
 from analyzer.mx import evaluate_mx_hosts
 from analyzer.ns import evaluate_ns_hosts
+from analyzer.cname import evaluate_cname_targets
 from analyzer.sshfp import evaluate_sshfp
 from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
@@ -152,6 +153,10 @@ def _ns_hosts(*checks) -> object:
     return evaluate_ns_hosts("example.com", checks)
 
 
+def _cname_targets(*checks) -> object:
+    return evaluate_cname_targets(checks)
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -165,6 +170,7 @@ def _bind(
     fcrdns=None,
     mx_hosts=None,
     ns_hosts=None,
+    cname_targets=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -177,6 +183,9 @@ def _bind(
     mock_cls.return_value.inspect_fcrdns.return_value = fcrdns or _fcrdns()
     mock_cls.return_value.inspect_mx_hosts.return_value = mx_hosts or _mx_hosts()
     mock_cls.return_value.inspect_ns_hosts.return_value = ns_hosts or _ns_hosts()
+    mock_cls.return_value.inspect_cname_targets.return_value = (
+        cname_targets or _cname_targets()
+    )
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -590,6 +599,32 @@ def test_cli_prints_ns_hosts(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_cname_targets(mock_resolver_cls, capsys) -> None:
+    from analyzer.cname import CnameTargetCheck
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        cname_targets=_cname_targets(
+            CnameTargetCheck(
+                target="cdn.example.net",
+                chain=("cdn.example.net",),
+                ipv4=("192.0.2.10",),
+                ipv6=(),
+                status="RESOLVES",
+            )
+        ),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "CNAME TARGETS" in output
+    assert "Status: RESOLVES" in output
+    assert "cdn.example.net" in output
+    mock_resolver_cls.return_value.inspect_cname_targets.assert_called_once()
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -691,6 +726,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_fcrdns.assert_not_called()
     mock_resolver_cls.return_value.inspect_mx_hosts.assert_not_called()
     mock_resolver_cls.return_value.inspect_ns_hosts.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cname_targets.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -1013,6 +1049,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["fcrdns"]["checks"] == []
     assert data["mx_hosts"]["checks"] == []
     assert data["ns_hosts"]["checks"] == []
+    assert data["cname_targets"]["checks"] == []
 
 
 @patch("cli.interface.DNSResolver")

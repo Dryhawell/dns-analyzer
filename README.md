@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.13.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.14.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV) are observations, not automatic proof of compromise.
 
@@ -14,7 +14,7 @@ DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 
 1. Validates and normalizes the input
 2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB, PTR)
-3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, optional DKIM / SRV)
+3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, optional DKIM / SRV)
 4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
 Three layers:
@@ -61,6 +61,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - FCrDNS for A/AAAA (PTR then forward); the IP is not contacted
 - MX host A/AAAA (RFC 5321); SMTP is not probed
 - NS host A/AAAA; AXFR is not attempted
+- CNAME target A/AAAA (up to 5 hops); HTTP is not fetched
 - CAA inspection
 - HTTPS / SVCB (RFC 9460) — ALPN, port, ECH presence; not an HTTP scanner
 - Reverse DNS (`PTR`)
@@ -173,9 +174,9 @@ python main.py --version
 
 | Mode | What you get |
 | --- | --- |
-| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, findings, risk score |
+| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, findings, risk score |
 | `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
-| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / SSHFP / FCrDNS / MX hosts / NS hosts / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB dump; MX and NS are still queried for host addresses) |
+| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / SSHFP / FCrDNS / MX hosts / NS hosts / CNAME targets / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB dump; MX and NS are still queried for host addresses) |
 | `--dkim SELECTOR` | TXT at `SELECTOR._domainkey.<domain>`. Repeatable (max 8). Never guessed |
 | `--srv SERVICE` | SRV at `_SERVICE._tcp.<domain>` (or `SERVICE/udp`). Repeatable (max 8). Never guessed |
 | `--record A --security` | That type plus the security sections |
@@ -185,7 +186,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.13.0` and exit |
+| `--version` | Print `dns-analyzer 1.14.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -297,7 +298,7 @@ JSON and CSV are for other programs, not for humans scraping the terminal. HTML 
 
 HTML uses inline CSS only: no JavaScript, no CDN. Record values are escaped (`&lt;script&gt;`) so a TXT string cannot inject markup.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi`, `tlsa`, `sshfp`, `fcrdns`, `mx_hosts` and `ns_hosts` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
+JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi`, `tlsa`, `sshfp`, `fcrdns`, `mx_hosts`, `ns_hosts` and `cname_targets` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, including extra resolvers when comparison is on, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
@@ -408,6 +409,8 @@ Missing DMARC is an observation, not an automatic critical vulnerability. Multip
 
 **NS hosts** are also names. After the NS RRset, this tool looks up A/AAAA for up to 8 targets and labels each as **in-bailiwick** (`ns1.example.com` for `example.com`) or **out-of-bailiwick** (`ns1.other.net`). In-bailiwick names usually need **glue** at the parent. This tool does **not** open TCP/53 to the NS, does not send AXFR, and does not prove a server is lame. Missing NS is common on subdomains; the parent holds the delegation.
 
+**CNAME targets** follow each alias (up to 8 names, 5 hops) and look up A/AAAA at the end of the chain. This tool does **not** fetch HTTP. `RESOLVES` means the chain ended at an address. `NXDOMAIN` / `NO ADDRESS` can be a leftover alias — it is **not** automatically a subdomain takeover. `LOOP` is a configuration error. Apex names often have no CNAME.
+
 ---
 
 ## SRV
@@ -458,7 +461,7 @@ dns-analyzer/
 │   ├── models.py                # DNSRecord, CoreLookup
 │   ├── reverse.py               # IP → PTR name
 │   ├── ttl.py                   # cache-lifetime wording
-│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py / sshfp.py / fcrdns.py / mx.py / ns.py
+│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py / sshfp.py / fcrdns.py / mx.py / ns.py / cname.py
 │   ├── security.py / risk.py
 │   ├── config.py / compare.py   # named resolvers, A/AAAA diff
 │   └── result.py                # one run, ready to export
@@ -480,7 +483,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -503,6 +506,7 @@ If a test needs the network, it does not belong in this suite.
 - FCrDNS is DNS-only (PTR then forward A/AAAA); the IP is not contacted; mismatch is not hijacking
 - MX host lookup is DNS-only (A/AAAA of the MX target); SMTP is not probed; missing MX is not a compromise
 - NS host lookup is DNS-only (A/AAAA of the NS target); AXFR is not attempted; missing address is not lame-server proof
+- CNAME target lookup is DNS-only (A/AAAA at the end of the alias chain); HTTP is not fetched; a missing target is not takeover
 - Documentation addresses (`192.0.2.0/24`, `2001:db8::/32`, …) are labeled, not scored as private LAN
 - The risk score is a local heuristic, not a security standard
 - Different answers from two resolvers are not proof of hijacking
@@ -519,7 +523,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.13.0** adds NS host address lookup. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.14.0** adds CNAME target address lookup. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

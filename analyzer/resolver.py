@@ -48,6 +48,15 @@ from analyzer.ns import (
     ns_in_bailiwick,
     unique_ns_hosts,
 )
+from analyzer.cname import (
+    MAX_HOPS,
+    MAX_TARGETS,
+    CnameTargetCheck,
+    CnameTargetObservation,
+    cname_target_name,
+    evaluate_cname_targets,
+    unique_cname_targets,
+)
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
@@ -517,6 +526,102 @@ class DNSResolver:
             return (), str(exc), False
         ips = tuple(dict.fromkeys(canonicalize_ip(record.value) for record in answers))
         return ips, None, False
+
+    def inspect_cname_targets(self, lookup: CoreLookup) -> CnameTargetObservation:
+        """A/AAAA at the end of each CNAME. Does not fetch HTTP."""
+        targets = unique_cname_targets(lookup.cname)
+        truncated = len(targets) > MAX_TARGETS
+        checks = tuple(self._cname_target_check(item) for item in targets[:MAX_TARGETS])
+        return evaluate_cname_targets(checks, truncated=truncated)
+
+    def _cname_target_check(self, target: str) -> CnameTargetCheck:
+        current = cname_target_name(target)
+        chain: list[str] = []
+        hops = 0
+        while hops < MAX_HOPS:
+            if not current:
+                return CnameTargetCheck(
+                    target=target,
+                    chain=tuple(chain),
+                    ipv4=(),
+                    ipv6=(),
+                    status="NO ADDRESS",
+                )
+            if current in chain:
+                return CnameTargetCheck(
+                    target=target,
+                    chain=tuple(chain),
+                    ipv4=(),
+                    ipv6=(),
+                    status="LOOP",
+                )
+            chain.append(current)
+            ipv4, err4, nx4 = self._lookup_host_ips(current, "A")
+            ipv6, err6, nx6 = self._lookup_host_ips(current, "AAAA")
+            aliases, errc, nxc = self._lookup_cnames(current)
+            if ipv4 or ipv6:
+                return CnameTargetCheck(
+                    target=target,
+                    chain=tuple(chain),
+                    ipv4=ipv4,
+                    ipv6=ipv6,
+                    status="RESOLVES",
+                )
+            if aliases:
+                current = aliases[0]
+                hops += 1
+                continue
+            errors = [item for item in (err4, err6, errc) if item]
+            if errors:
+                return CnameTargetCheck(
+                    target=target,
+                    chain=tuple(chain),
+                    ipv4=(),
+                    ipv6=(),
+                    status="UNREADABLE",
+                    error="; ".join(errors),
+                )
+            if nx4 or nx6 or nxc:
+                return CnameTargetCheck(
+                    target=target,
+                    chain=tuple(chain),
+                    ipv4=(),
+                    ipv6=(),
+                    status="NXDOMAIN",
+                )
+            return CnameTargetCheck(
+                target=target,
+                chain=tuple(chain),
+                ipv4=(),
+                ipv6=(),
+                status="NO ADDRESS",
+            )
+        return CnameTargetCheck(
+            target=target,
+            chain=tuple(chain),
+            ipv4=(),
+            ipv6=(),
+            status="TOO DEEP",
+            error="CNAME chain longer than 5 hops",
+        )
+
+    def _lookup_cnames(
+        self, host: str
+    ) -> tuple[tuple[str, ...], str | None, bool]:
+        try:
+            records = self.resolve_cname(host)
+        except DomainNotFoundError:
+            return (), None, True
+        except DNSQueryError as exc:
+            return (), str(exc), False
+        names = tuple(
+            dict.fromkeys(
+                cname_target_name(record.value)
+                for record in records
+                if cname_target_name(record.value)
+            )
+        )
+        return names, None, False
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

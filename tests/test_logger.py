@@ -16,6 +16,7 @@ def _bind_lookup(mock_cls) -> None:
     from analyzer.fcrdns import evaluate_fcrdns
     from analyzer.mx import evaluate_mx_hosts
     from analyzer.ns import evaluate_ns_hosts
+    from analyzer.cname import evaluate_cname_targets
     from analyzer.sshfp import evaluate_sshfp
     from analyzer.tlsa import evaluate_tlsa
     from analyzer.mtasts import evaluate_mta_sts
@@ -59,6 +60,7 @@ def _bind_lookup(mock_cls) -> None:
     mock_cls.return_value.inspect_ns_hosts.return_value = evaluate_ns_hosts(
         "example.com", ()
     )
+    mock_cls.return_value.inspect_cname_targets.return_value = evaluate_cname_targets(())
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 

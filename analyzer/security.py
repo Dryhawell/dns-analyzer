@@ -22,6 +22,7 @@ from analyzer.srv import SrvObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
+from analyzer.cname import CnameTargetObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -58,7 +59,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target observations."""
 
     def analyze(
         self,
@@ -76,6 +77,7 @@ class SecurityAnalyzer:
         fcrdns: FcrdnsObservation | None = None,
         mx_hosts: MxHostObservation | None = None,
         ns_hosts: NsHostObservation | None = None,
+        cname_targets: CnameTargetObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -101,7 +103,10 @@ class SecurityAnalyzer:
             findings.extend(self._ns_hosts(ns_hosts))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
-        findings.extend(self._cname(lookup))
+        if cname_targets is not None:
+            findings.extend(self._cname_targets(cname_targets))
+        else:
+            findings.extend(self._cname(lookup))
         findings.extend(self._txt_volume(lookup))
         order = {"high": 0, "medium": 1, "low": 2, "info": 3}
         findings.sort(key=lambda item: (order.get(item.severity, 9), item.title))
@@ -852,6 +857,102 @@ class SecurityAnalyzer:
                         "This tool does not open port 53 to the NS."
                     ),
                     code="ns_host_no_address",
+                )
+            )
+        return findings
+
+    def _cname_targets(self, observation: CnameTargetObservation) -> list[SecurityFinding]:
+        if observation.status == "UNREADABLE":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CNAME targets could not be read",
+                    description=(
+                        "Following CNAME targets timed out or failed. A timeout is not a "
+                        "dangling alias, and it is not a compromise."
+                    ),
+                    recommendation="Retry the CNAME lookup before treating the alias as unpublished.",
+                    code="cname_target_unreadable",
+                )
+            ]
+        findings: list[SecurityFinding] = []
+        unread = [item.target for item in observation.checks if item.status == "UNREADABLE"]
+        missing = [item.target for item in observation.checks if item.status == "NXDOMAIN"]
+        empty = [item.target for item in observation.checks if item.status == "NO ADDRESS"]
+        loops = [item.target for item in observation.checks if item.status == "LOOP"]
+        deep = [item.target for item in observation.checks if item.status == "TOO DEEP"]
+        if unread:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="Some CNAME targets could not be read",
+                    description=(
+                        "A/AAAA or CNAME lookup timed out for: "
+                        + ", ".join(unread)
+                        + ". A timeout is not a missing address, and it is not a takeover."
+                    ),
+                    recommendation="Retry the target lookup before treating the alias as dangling.",
+                    code="cname_target_unreadable",
+                )
+            )
+        if missing:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="CNAME target does not exist",
+                    description=(
+                        "CNAME points at a name that returned NXDOMAIN: "
+                        + ", ".join(missing)
+                        + ". That can be a leftover alias. It is not automatically an active takeover."
+                    ),
+                    recommendation=(
+                        "If you operate the name, point the CNAME at a host that exists "
+                        "or remove it. This tool does not fetch HTTP."
+                    ),
+                    code="cname_target_nxdomain",
+                )
+            )
+        if empty:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="CNAME target has no A/AAAA",
+                    description=(
+                        "CNAME points at a name with no A or AAAA: "
+                        + ", ".join(empty)
+                        + ". That can be IPv6-only elsewhere, or a dangling alias. "
+                        "It is not automatically an active takeover."
+                    ),
+                    recommendation="Resolve the target directly. This tool does not fetch HTTP.",
+                    code="cname_target_no_address",
+                )
+            )
+        if loops:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="CNAME loop",
+                    description=(
+                        "CNAME chain repeats a name: "
+                        + ", ".join(loops)
+                        + ". That is a configuration error, not proof of hijacking."
+                    ),
+                    recommendation="Break the loop so the alias ends at a name with A/AAAA.",
+                    code="cname_target_loop",
+                )
+            )
+        if deep:
+            findings.append(
+                SecurityFinding(
+                    severity="info",
+                    title="CNAME chain too long",
+                    description=(
+                        "CNAME chain exceeded 5 hops for: "
+                        + ", ".join(deep)
+                        + ". This tool stops there and does not fetch HTTP."
+                    ),
+                    recommendation="Shorten the alias chain so clients can resolve an address.",
+                    code="cname_target_too_deep",
                 )
             )
         return findings

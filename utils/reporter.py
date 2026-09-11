@@ -17,6 +17,7 @@ from analyzer.bimi import BimiObservation
 from analyzer.fcrdns import FcrdnsCheck, FcrdnsObservation
 from analyzer.mx import MxHostCheck, MxHostObservation
 from analyzer.ns import NsHostCheck, NsHostObservation
+from analyzer.cname import CnameTargetCheck, CnameTargetObservation
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -76,6 +77,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "fcrdns": _fcrdns_dict(result.fcrdns),
         "mx_hosts": _mx_hosts_dict(result.mx_hosts),
         "ns_hosts": _ns_hosts_dict(result.ns_hosts),
+        "cname_targets": _cname_targets_dict(result.cname_targets),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -382,6 +384,29 @@ def _ns_hosts_dict(observation: NsHostObservation | None) -> dict[str, object] |
     }
 
 
+def _cname_target_check_dict(item: CnameTargetCheck) -> dict[str, object]:
+    return {
+        "target": item.target,
+        "chain": list(item.chain),
+        "ipv4": list(item.ipv4),
+        "ipv6": list(item.ipv6),
+        "status": item.status,
+        "error": item.error,
+    }
+
+
+def _cname_targets_dict(observation: CnameTargetObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "checks": [_cname_target_check_dict(item) for item in observation.checks],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -519,6 +544,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_mx_hosts(result.mx_hosts))
     if result.ns_hosts is not None:
         parts.extend(_html_ns_hosts(result.ns_hosts))
+    if result.cname_targets is not None:
+        parts.extend(_html_cname_targets(result.cname_targets))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -818,6 +845,33 @@ def _html_ns_hosts(observation: NsHostObservation) -> list[str]:
             parts.append(f"<p class=\"note\">{_e(item.error)}</p>")
     if observation.truncated:
         parts.append("<p class=\"note\">More than 8 NS hosts; extra targets were not checked.</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_cname_targets(observation: CnameTargetObservation) -> list[str]:
+    parts = [
+        "<h2>CNAME targets</h2>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No CNAME records at this name.</p>")
+    for item in observation.checks:
+        parts.append(
+            f"<p><code>{_e(item.target)}</code> — <strong>{_e(item.status)}</strong></p>"
+        )
+        if item.chain:
+            parts.append(f"<p>Chain: <code>{_e(' -> '.join(item.chain))}</code></p>")
+        if item.ipv4:
+            parts.append(f"<p>A: <code>{_e(', '.join(item.ipv4))}</code></p>")
+        if item.ipv6:
+            parts.append(f"<p>AAAA: <code>{_e(', '.join(item.ipv6))}</code></p>")
+        if item.error:
+            parts.append(f"<p class=\"note\">{_e(item.error)}</p>")
+    if observation.truncated:
+        parts.append("<p class=\"note\">More than 8 CNAME targets; extra aliases were not checked.</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

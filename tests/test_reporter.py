@@ -61,6 +61,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["fcrdns"] is None
     assert payload["mx_hosts"] is None
     assert payload["ns_hosts"] is None
+    assert payload["cname_targets"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -545,6 +546,46 @@ def test_json_and_html_include_ns_hosts() -> None:
                         status="NXDOMAIN",
                     )
                 ],
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_cname_targets() -> None:
+    from analyzer.cname import CnameTargetCheck, evaluate_cname_targets
+
+    observation = evaluate_cname_targets(
+        [
+            CnameTargetCheck(
+                target="cdn.example.net",
+                chain=("cdn.example.net",),
+                ipv4=("192.0.2.10",),
+                ipv6=(),
+                status="RESOLVES",
+            )
+        ]
+    )
+    result = _result(cname_targets=observation)
+    payload = result_to_dict(result)
+    assert payload["cname_targets"]["status"] == "FOUND"
+    assert payload["cname_targets"]["checks"][0]["target"] == "cdn.example.net"
+    page = dumps_html(result)
+    assert "CNAME targets" in page
+    assert "RESOLVES" in page
+    xss = dumps_html(
+        _result(
+            cname_targets=evaluate_cname_targets(
+                [
+                    CnameTargetCheck(
+                        target="<script>x</script>",
+                        chain=("<script>x</script>",),
+                        ipv4=(),
+                        ipv6=(),
+                        status="NXDOMAIN",
+                    )
+                ]
             )
         )
     )
