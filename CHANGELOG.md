@@ -2,6 +2,22 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.15.0 — 2026-09-13
+
+SOA primary vs NS set. Zone transfer is not attempted.
+
+### Added
+
+- Default / `--security` / `--all` compare SOA mname to the NS set
+- CLI/JSON/HTML show `ALIGNED` / `HIDDEN PRIMARY` / `NO NS` / `NOT DETECTED` / `UNREADABLE`
+- Findings: `soa_ns_unreadable` / `soa_hidden_primary` / `soa_without_ns` are info (+0)
+
+### Notes
+
+- A hidden primary (mname not in NS) is a common, valid design
+- This tool does not contact the primary or attempt AXFR
+- Missing SOA is common on subdomains
+
 ## 1.14.0 — 2026-09-11
 
 CNAME target address lookup. HTTP is not fetched.

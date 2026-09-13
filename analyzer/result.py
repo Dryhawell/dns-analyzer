@@ -22,6 +22,7 @@ from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
 from analyzer.cname import CnameTargetObservation
+from analyzer.soa import SoaNsObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -49,6 +50,7 @@ class DNSAnalysisResult:
     mx_hosts: MxHostObservation | None = None
     ns_hosts: NsHostObservation | None = None
     cname_targets: CnameTargetObservation | None = None
+    soa_ns: SoaNsObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     security: SecurityReport | None = None

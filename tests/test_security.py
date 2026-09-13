@@ -1004,6 +1004,51 @@ def test_cname_target_resolves_skips_legacy_dangling() -> None:
     assert report.risk.value == 0
 
 
+def test_soa_hidden_primary_is_info_and_unscored() -> None:
+    from analyzer.risk import WEIGHTS
+    from analyzer.soa import evaluate_soa_ns
+
+    observation = evaluate_soa_ns(
+        "example.com",
+        "hidden.example.net",
+        ("ns1.example.com",),
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        soa_ns=observation,
+    )
+    hidden = next(item for item in report.findings if item.code == "soa_hidden_primary")
+    assert hidden.severity == "info"
+    assert WEIGHTS["soa_hidden_primary"] == 0
+    assert report.risk.value == 0
+
+
+def test_soa_ns_aligned_adds_no_points() -> None:
+    from analyzer.soa import evaluate_soa_ns
+
+    observation = evaluate_soa_ns(
+        "example.com",
+        "ns1.example.com",
+        ("ns1.example.com", "ns2.example.com"),
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        soa_ns=observation,
+    )
+    assert not any(item.code.startswith("soa_") for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_spf_include_timeout_is_info_not_missing_apex() -> None:
     from analyzer.spf import SpfHop, inspect_spf
 

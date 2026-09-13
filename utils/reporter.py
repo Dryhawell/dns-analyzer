@@ -18,6 +18,7 @@ from analyzer.fcrdns import FcrdnsCheck, FcrdnsObservation
 from analyzer.mx import MxHostCheck, MxHostObservation
 from analyzer.ns import NsHostCheck, NsHostObservation
 from analyzer.cname import CnameTargetCheck, CnameTargetObservation
+from analyzer.soa import SoaNsObservation
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -78,6 +79,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "mx_hosts": _mx_hosts_dict(result.mx_hosts),
         "ns_hosts": _ns_hosts_dict(result.ns_hosts),
         "cname_targets": _cname_targets_dict(result.cname_targets),
+        "soa_ns": _soa_ns_dict(result.soa_ns),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -407,6 +409,20 @@ def _cname_targets_dict(observation: CnameTargetObservation | None) -> dict[str,
     }
 
 
+def _soa_ns_dict(observation: SoaNsObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "mname": observation.mname,
+        "serial": observation.serial,
+        "ns_hosts": list(observation.ns_hosts),
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -546,6 +562,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_ns_hosts(result.ns_hosts))
     if result.cname_targets is not None:
         parts.extend(_html_cname_targets(result.cname_targets))
+    if result.soa_ns is not None:
+        parts.extend(_html_soa_ns(result.soa_ns))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -872,6 +890,27 @@ def _html_cname_targets(observation: CnameTargetObservation) -> list[str]:
             parts.append(f"<p class=\"note\">{_e(item.error)}</p>")
     if observation.truncated:
         parts.append("<p class=\"note\">More than 8 CNAME targets; extra aliases were not checked.</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_soa_ns(observation: SoaNsObservation) -> list[str]:
+    parts = [
+        "<h2>SOA / NS</h2>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No SOA record at this name.</p>")
+    if observation.mname:
+        parts.append(f"<p>Primary: <code>{_e(observation.mname)}</code></p>")
+    if observation.serial:
+        parts.append(f"<p>Serial: <code>{_e(observation.serial)}</code></p>")
+    if observation.ns_hosts:
+        parts.append(f"<p>NS: <code>{_e(', '.join(observation.ns_hosts))}</code></p>")
+    elif observation.status == "NO NS":
+        parts.append("<p>No NS records at this name.</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

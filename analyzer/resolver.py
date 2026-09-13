@@ -57,6 +57,13 @@ from analyzer.cname import (
     evaluate_cname_targets,
     unique_cname_targets,
 )
+from analyzer.soa import (
+    SoaNsObservation,
+    evaluate_soa_ns,
+    ns_names_from_records,
+    soa_primary,
+    soa_serial,
+)
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import DnssecObservation, evaluate_dnssec
@@ -622,6 +629,30 @@ class DNSResolver:
             )
         )
         return names, None, False
+
+    def inspect_soa_ns(self, name: str) -> SoaNsObservation:
+        """Compare SOA mname to the NS set. Does not AXFR or contact the primary."""
+        host = name.rstrip(".").lower()
+        try:
+            soa_records = self.resolve_soa(host)
+        except DomainNotFoundError:
+            return evaluate_soa_ns(host, None, ())
+        except DNSQueryError as exc:
+            return evaluate_soa_ns(host, None, (), error=str(exc))
+        primary = soa_primary(soa_records[0]) if soa_records else None
+        serial = soa_serial(soa_records[0]) if soa_records else None
+        try:
+            ns_records = self.resolve_ns(host)
+        except DomainNotFoundError:
+            return evaluate_soa_ns(host, primary, (), serial=serial)
+        except DNSQueryError as exc:
+            return evaluate_soa_ns(host, primary, (), serial=serial, error=str(exc))
+        return evaluate_soa_ns(
+            host,
+            primary,
+            ns_names_from_records(ns_records),
+            serial=serial,
+        )
 
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""

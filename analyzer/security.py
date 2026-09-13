@@ -23,6 +23,7 @@ from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
 from analyzer.cname import CnameTargetObservation
+from analyzer.soa import SoaNsObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -59,7 +60,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS observations."""
 
     def analyze(
         self,
@@ -78,6 +79,7 @@ class SecurityAnalyzer:
         mx_hosts: MxHostObservation | None = None,
         ns_hosts: NsHostObservation | None = None,
         cname_targets: CnameTargetObservation | None = None,
+        soa_ns: SoaNsObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -101,6 +103,8 @@ class SecurityAnalyzer:
             findings.extend(self._mx_hosts(mx_hosts))
         if ns_hosts is not None:
             findings.extend(self._ns_hosts(ns_hosts))
+        if soa_ns is not None:
+            findings.extend(self._soa_ns(soa_ns))
         findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         if cname_targets is not None:
@@ -860,6 +864,53 @@ class SecurityAnalyzer:
                 )
             )
         return findings
+
+    def _soa_ns(self, observation: SoaNsObservation) -> list[SecurityFinding]:
+        if observation.status == "UNREADABLE":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="SOA / NS could not be compared",
+                    description=(
+                        "SOA or NS lookup timed out or failed. A timeout is not a missing "
+                        "primary, and it is not a compromise."
+                    ),
+                    recommendation="Retry the SOA/NS lookup before treating the primary as unpublished.",
+                    code="soa_ns_unreadable",
+                )
+            ]
+        if observation.status == "HIDDEN PRIMARY":
+            primary = observation.mname or "(unknown)"
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="SOA primary is not in the NS set",
+                    description=(
+                        f"SOA mname is {primary}, which is not published as NS. "
+                        "This can be a hidden master and is a common, valid design. "
+                        "It is not proof of hijacking."
+                    ),
+                    recommendation=(
+                        "If you operate the zone, this is expected when the primary "
+                        "is hidden. This tool does not attempt AXFR."
+                    ),
+                    code="soa_hidden_primary",
+                )
+            ]
+        if observation.status == "NO NS":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="SOA without NS at this name",
+                    description=(
+                        "A SOA was returned but no NS records. On a subdomain the "
+                        "delegation often lives at the parent. This is not a compromise."
+                    ),
+                    recommendation="Check NS at the parent if this name is not the zone apex.",
+                    code="soa_without_ns",
+                )
+            ]
+        return []
 
     def _cname_targets(self, observation: CnameTargetObservation) -> list[SecurityFinding]:
         if observation.status == "UNREADABLE":

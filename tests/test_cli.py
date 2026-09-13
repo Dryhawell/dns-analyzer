@@ -15,6 +15,7 @@ from analyzer.fcrdns import FcrdnsCheck, evaluate_fcrdns
 from analyzer.mx import evaluate_mx_hosts
 from analyzer.ns import evaluate_ns_hosts
 from analyzer.cname import evaluate_cname_targets
+from analyzer.soa import evaluate_soa_ns
 from analyzer.sshfp import evaluate_sshfp
 from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
@@ -157,6 +158,10 @@ def _cname_targets(*checks) -> object:
     return evaluate_cname_targets(checks)
 
 
+def _soa_ns() -> object:
+    return evaluate_soa_ns("example.com", None, ())
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -171,6 +176,7 @@ def _bind(
     mx_hosts=None,
     ns_hosts=None,
     cname_targets=None,
+    soa_ns=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -186,6 +192,7 @@ def _bind(
     mock_cls.return_value.inspect_cname_targets.return_value = (
         cname_targets or _cname_targets()
     )
+    mock_cls.return_value.inspect_soa_ns.return_value = soa_ns or _soa_ns()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -625,6 +632,27 @@ def test_cli_prints_cname_targets(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_soa_ns(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        soa_ns=evaluate_soa_ns(
+            "example.com",
+            "ns1.example.com",
+            ("ns1.example.com", "ns2.example.com"),
+            serial="2026091301",
+        ),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "SOA / NS" in output
+    assert "Status: ALIGNED" in output
+    assert "ns1.example.com" in output
+    mock_resolver_cls.return_value.inspect_soa_ns.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -727,6 +755,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_mx_hosts.assert_not_called()
     mock_resolver_cls.return_value.inspect_ns_hosts.assert_not_called()
     mock_resolver_cls.return_value.inspect_cname_targets.assert_not_called()
+    mock_resolver_cls.return_value.inspect_soa_ns.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -1050,6 +1079,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["mx_hosts"]["checks"] == []
     assert data["ns_hosts"]["checks"] == []
     assert data["cname_targets"]["checks"] == []
+    assert data["soa_ns"]["status"] == "NOT DETECTED"
 
 
 @patch("cli.interface.DNSResolver")

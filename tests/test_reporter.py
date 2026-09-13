@@ -62,6 +62,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["mx_hosts"] is None
     assert payload["ns_hosts"] is None
     assert payload["cname_targets"] is None
+    assert payload["soa_ns"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -586,6 +587,35 @@ def test_json_and_html_include_cname_targets() -> None:
                         status="NXDOMAIN",
                     )
                 ]
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_soa_ns() -> None:
+    from analyzer.soa import evaluate_soa_ns
+
+    observation = evaluate_soa_ns(
+        "example.com",
+        "ns1.example.com",
+        ("ns1.example.com", "ns2.example.com"),
+        serial="2026091301",
+    )
+    result = _result(soa_ns=observation)
+    payload = result_to_dict(result)
+    assert payload["soa_ns"]["status"] == "ALIGNED"
+    assert payload["soa_ns"]["mname"] == "ns1.example.com"
+    page = dumps_html(result)
+    assert "SOA / NS" in page
+    assert "ALIGNED" in page
+    xss = dumps_html(
+        _result(
+            soa_ns=evaluate_soa_ns(
+                "example.com",
+                "<script>x</script>",
+                ("ns1.example.com",),
             )
         )
     )
