@@ -27,6 +27,7 @@ from analyzer.ns import NsHostObservation
 from analyzer.cname import CnameTargetObservation
 from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation
+from analyzer.cds import CdsObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -63,7 +64,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS observations."""
 
     def analyze(
         self,
@@ -86,6 +87,7 @@ class SecurityAnalyzer:
         caa: CaaObservation | None = None,
         naptr: NaptrObservation | None = None,
         uri: UriObservation | None = None,
+        cds: CdsObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -97,6 +99,8 @@ class SecurityAnalyzer:
             findings.extend(self._naptr(naptr))
         if uri is not None:
             findings.extend(self._uri(uri))
+        if cds is not None:
+            findings.extend(self._cds(cds))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
@@ -516,6 +520,43 @@ class SecurityAnalyzer:
                         "and does not fetch the target."
                     ),
                     code="uri_missing",
+                )
+            ]
+        return []
+
+    def _cds(self, observation: CdsObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CDS/CDNSKEY could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "CDS set, and it is not broken DNSSEC or a compromise."
+                    ),
+                    recommendation=(
+                        "Retry the CDS/CDNSKEY lookup before treating child-to-parent "
+                        "DS signaling as unpublished."
+                    ),
+                    code="cds_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CDS/CDNSKEY not published",
+                    description=(
+                        f"No CDS or CDNSKEY record at {observation.query_name}. "
+                        "Absence is common for signed and unsigned zones. "
+                        "This is not broken DNSSEC and is not a compromise."
+                    ),
+                    recommendation=(
+                        "CDS/CDNSKEY are optional child-to-parent DS signals "
+                        "(RFC 7344). This tool does not contact the parent "
+                        "registry or submit a DS update."
+                    ),
+                    code="cds_missing",
                 )
             ]
         return []

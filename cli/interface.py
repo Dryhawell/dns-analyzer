@@ -48,6 +48,7 @@ from analyzer.ns import NsHostObservation
 from analyzer.cname import CnameTargetObservation
 from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation
+from analyzer.cds import CdsObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.models import CoreLookup, DNSRecord
@@ -100,7 +101,7 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 --naptr is opt-in; ENUM/SIP applications are never guessed.
@@ -108,7 +109,7 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
 MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, or URI is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary are also observations, not hijacking.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS are also observations, not hijacking.
 """
 
 
@@ -117,7 +118,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/CNAME targets/SOA-NS/CAA summary/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/CNAME targets/SOA-NS/CAA summary/CDS/CDNSKEY/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -179,13 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
             "SRV is --srv, not --record SRV. NAPTR is --naptr, not --record NAPTR. "
             "URI is --uri, not --record URI. "
             "TLSA is DANE at _443._tcp, not --record TLSA. "
-            "SSHFP is in the security view, not --record SSHFP."
+            "SSHFP is in the security view, not --record SSHFP. "
+            "CDS/CDNSKEY are in the security view, not --record CDS."
         ),
     )
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -285,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "URI", "TLSA", "SSHFP"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "TLSA", "SSHFP", "CDS", "CDNSKEY"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -317,6 +319,16 @@ def _record_type_error(raw: str) -> str:
         return (
             "SSHFP is queried at this hostname with default / --security. "
             "It is not a --record dump type."
+        )
+    if kind == "CDS":
+        return (
+            "CDS is listed with default / --security (RFC 7344 child-to-parent "
+            "DS signaling). It is not a --record dump type."
+        )
+    if kind == "CDNSKEY":
+        return (
+            "CDNSKEY is listed with default / --security (RFC 7344 child-to-parent "
+            "DS signaling). It is not a --record dump type."
         )
     allowed = ", ".join(_RECORD_ORDER)
     return f"Unknown record type {raw!r}. Use one of: {allowed}."
@@ -687,6 +699,7 @@ def _print_lookup(
     cname_targets: CnameTargetObservation | None = None,
     soa_ns: SoaNsObservation | None = None,
     caa: CaaObservation | None = None,
+    cds: CdsObservation | None = None,
     naptr: NaptrObservation | None = None,
     uri: UriObservation | None = None,
 ) -> None:
@@ -754,12 +767,14 @@ def _print_lookup(
             or cname_targets is None
             or soa_ns is None
             or caa is None
+            or cds is None
             or security is None
         ):
             raise RuntimeError(
-                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS/CAA results."
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS/CAA/CDS results."
             )
         _print_dnssec(dnssec)
+        _print_cds(cds)
         _print_spf(spf)
         _print_dmarc(dmarc)
         _print_mta_sts(mta_sts)
@@ -802,6 +817,41 @@ def _print_dnssec(observation: DnssecObservation) -> None:
             )
         if observation.delegations_truncated:
             print("  Note: more than 8 DS records; extras were not listed.")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_cds(observation: CdsObservation) -> None:
+    print("CDS / CDNSKEY")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    print(f"CDS:     {'FOUND' if observation.cds_found else 'NOT FOUND'}")
+    print(f"CDNSKEY: {'FOUND' if observation.cdnskey_found else 'NOT FOUND'}")
+    if observation.status == "NOT DETECTED":
+        print("No CDS or CDNSKEY records at this name.")
+    if observation.cds:
+        print("CDS:")
+        for item in observation.cds:
+            print(
+                f"  {item.key_tag} {item.algorithm} {item.digest_type}  "
+                f"({item.algorithm_meaning}, {item.digest_meaning})"
+            )
+        if observation.cds_truncated:
+            print("  Note: more than 8 CDS records; extras were not listed.")
+    if observation.cdnskey:
+        print("CDNSKEY:")
+        for key in observation.cdnskey:
+            tag = f", key tag {key.key_tag}" if key.key_tag is not None else ""
+            print(
+                f"  {key.flags} {key.protocol} {key.algorithm}  "
+                f"({key.role}, {key.algorithm_meaning}{tag})"
+            )
+        if observation.cdnskey_truncated:
+            print("  Note: more than 8 CDNSKEY records; extras were not listed.")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1586,6 +1636,7 @@ def _run(argv: list[str] | None = None) -> int:
     cname_targets = None
     soa_ns = None
     caa = None
+    cds = None
     naptr_observation = None
     uri_observation = None
     try:
@@ -1606,6 +1657,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_cname_targets = pool.submit(resolver.inspect_cname_targets, lookup)
                 fut_soa_ns = pool.submit(resolver.inspect_soa_ns, domain)
                 fut_caa = pool.submit(resolver.inspect_caa, domain)
+                fut_cds = pool.submit(resolver.inspect_cds, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1633,6 +1685,7 @@ def _run(argv: list[str] | None = None) -> int:
                 cname_targets = fut_cname_targets.result()
                 soa_ns = fut_soa_ns.result()
                 caa = fut_caa.result()
+                cds = fut_cds.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1663,6 +1716,7 @@ def _run(argv: list[str] | None = None) -> int:
                 caa,
                 naptr=naptr_observation,
                 uri=uri_observation,
+                cds=cds,
             )
         elif selectors or srv_specs or args.naptr or args.uri:
             extra = len(selectors) + len(srv_specs) + extra_optin
@@ -1747,6 +1801,7 @@ def _run(argv: list[str] | None = None) -> int:
         cname_targets=cname_targets,
         soa_ns=soa_ns,
         caa=caa,
+        cds=cds,
         dkim=dkim_observations,
         srv=srv_observations,
         naptr=naptr_observation,
@@ -1788,6 +1843,7 @@ def _run(argv: list[str] | None = None) -> int:
             cname_targets,
             soa_ns,
             caa,
+            cds,
             naptr_observation,
             uri_observation,
         )

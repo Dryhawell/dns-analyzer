@@ -64,6 +64,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["cname_targets"] is None
     assert payload["soa_ns"] is None
     assert payload["caa"] is None
+    assert payload["cds"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["naptr"] is None
@@ -386,6 +387,65 @@ def test_json_and_html_include_uri() -> None:
         )
     )
     assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_cds() -> None:
+    from analyzer.cds import CdnskeyRecord, CdsRecord, evaluate_cds
+
+    observation = evaluate_cds(
+        "example.com",
+        cds_found=True,
+        cdnskey_found=True,
+        cds=(
+            CdsRecord(
+                key_tag=2371,
+                algorithm=13,
+                algorithm_meaning="ECDSAP256SHA256",
+                digest_type=2,
+                digest_meaning="SHA-256",
+            ),
+        ),
+        cdnskey=(
+            CdnskeyRecord(
+                flags=257,
+                protocol=3,
+                algorithm=13,
+                algorithm_meaning="ECDSAP256SHA256",
+                role="KSK",
+                zone_key=True,
+                secure_entry_point=True,
+                key_tag=2371,
+            ),
+        ),
+    )
+    result = _result(cds=observation)
+    payload = result_to_dict(result)
+    assert payload["cds"]["status"] == "FOUND"
+    assert payload["cds"]["cds"][0]["digest_type"] == 2
+    assert payload["cds"]["cdnskey"][0]["algorithm"] == 13
+    page = dumps_html(result)
+    assert "SHA-256" in page
+    assert "CDNSKEY" in page
+    xss = dumps_html(
+        _result(
+            cds=evaluate_cds(
+                "example.com",
+                cds_found=True,
+                cdnskey_found=False,
+                cds=(
+                    CdsRecord(
+                        key_tag=1,
+                        algorithm=8,
+                        algorithm_meaning="<script>x</script>",
+                        digest_type=2,
+                        digest_meaning="SHA-256",
+                    ),
+                ),
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
     assert "&lt;script&gt;" in xss
 
 

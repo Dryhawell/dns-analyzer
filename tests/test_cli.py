@@ -17,6 +17,7 @@ from analyzer.ns import evaluate_ns_hosts
 from analyzer.cname import evaluate_cname_targets
 from analyzer.soa import evaluate_soa_ns
 from analyzer.caa import evaluate_caa
+from analyzer.cds import CdnskeyRecord, CdsRecord, evaluate_cds
 from analyzer.sshfp import evaluate_sshfp
 from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
@@ -171,6 +172,10 @@ def _caa() -> object:
     return evaluate_caa("example.com", ())
 
 
+def _cds() -> object:
+    return evaluate_cds("example.com", cds_found=False, cdnskey_found=False)
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -187,6 +192,7 @@ def _bind(
     cname_targets=None,
     soa_ns=None,
     caa=None,
+    cds=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -204,6 +210,7 @@ def _bind(
     )
     mock_cls.return_value.inspect_soa_ns.return_value = soa_ns or _soa_ns()
     mock_cls.return_value.inspect_caa.return_value = caa or _caa()
+    mock_cls.return_value.inspect_cds.return_value = cds or _cds()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -225,6 +232,7 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_called_once_with("example.com")
     output = capsys.readouterr().out
     assert "Target:" in output
     assert "example.com" in output
@@ -366,6 +374,7 @@ def test_cli_record_https_skips_security(mock_resolver_cls, capsys) -> None:
     assert "ech=(present)" in output
     assert "SECURITY ANALYSIS" not in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A", "HTTPS")
     )
@@ -479,6 +488,51 @@ def test_cli_prints_dnssec_key_algorithms(mock_resolver_cls, capsys) -> None:
     assert "KSK" in output
     assert "SHA-256" in output
     assert "ECDSAP256SHA256" in output
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_prints_cds_records(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        cds=evaluate_cds(
+            "example.com",
+            cds_found=True,
+            cdnskey_found=True,
+            cds=(
+                CdsRecord(
+                    key_tag=2371,
+                    algorithm=13,
+                    algorithm_meaning="ECDSAP256SHA256",
+                    digest_type=2,
+                    digest_meaning="SHA-256",
+                ),
+            ),
+            cdnskey=(
+                CdnskeyRecord(
+                    flags=257,
+                    protocol=3,
+                    algorithm=13,
+                    algorithm_meaning="ECDSAP256SHA256",
+                    role="KSK",
+                    zone_key=True,
+                    secure_entry_point=True,
+                    key_tag=2371,
+                ),
+            ),
+        ),
+    )
+
+    assert run(["example.com", "--security"]) == 0
+    output = capsys.readouterr().out
+    assert "CDS / CDNSKEY" in output
+    assert "Status: FOUND" in output
+    assert "2371 13 2" in output
+    assert "SHA-256" in output
+    assert "257 3 13" in output
+    assert "KSK" in output
+    assert "parent registry" in output
+    mock_resolver_cls.return_value.inspect_cds.assert_called_once_with("example.com")
 
 
 @patch("cli.interface.DNSResolver")
@@ -826,6 +880,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     assert "SECURITY ANALYSIS" not in output
     assert "RISK SCORE" not in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
     mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
     mock_resolver_cls.return_value.inspect_mta_sts.assert_not_called()
     mock_resolver_cls.return_value.inspect_tls_rpt.assert_not_called()
@@ -838,6 +893,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_cname_targets.assert_not_called()
     mock_resolver_cls.return_value.inspect_soa_ns.assert_not_called()
     mock_resolver_cls.return_value.inspect_caa.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
@@ -886,6 +942,7 @@ def test_cli_security_flag_skips_record_dump(mock_resolver_cls, capsys) -> None:
     assert "SECURITY ANALYSIS" in output
     assert "RISK SCORE" in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_called_once()
+    mock_resolver_cls.return_value.inspect_cds.assert_called_once()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -958,6 +1015,20 @@ def test_cli_record_sshfp_hints_security_view(capsys) -> None:
     assert "--security" in err or "security" in err.lower()
 
 
+def test_cli_record_cds_hints_security_view(capsys) -> None:
+    assert run(["example.com", "--record", "CDS"]) == 1
+    err = capsys.readouterr().err
+    assert "CDS" in err
+    assert "--security" in err or "security" in err.lower()
+
+
+def test_cli_record_cdnskey_hints_security_view(capsys) -> None:
+    assert run(["example.com", "--record", "CDNSKEY"]) == 1
+    err = capsys.readouterr().err
+    assert "CDNSKEY" in err
+    assert "--security" in err or "security" in err.lower()
+
+
 def test_cli_rejects_all_with_record(capsys) -> None:
     assert run(["example.com", "--all", "--record", "A"]) == 1
     assert "Do not combine --all" in capsys.readouterr().err
@@ -1021,6 +1092,7 @@ def test_cli_dkim_prints_section(mock_resolver_cls, capsys) -> None:
         "example.com", "google"
     )
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")
@@ -1080,6 +1152,7 @@ def test_cli_srv_prints_section(mock_resolver_cls, capsys) -> None:
     assert "SECURITY ANALYSIS" not in output
     mock_resolver_cls.return_value.inspect_srv.assert_called_once()
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
     called_spec = mock_resolver_cls.return_value.inspect_srv.call_args[0][1]
     assert called_spec.service == "sip"
     assert called_spec.protocol == "tcp"
@@ -1147,6 +1220,7 @@ def test_cli_naptr_prints_section(mock_resolver_cls, capsys) -> None:
     assert "SECURITY ANALYSIS" not in output
     mock_resolver_cls.return_value.inspect_naptr.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")
@@ -1216,6 +1290,7 @@ def test_cli_uri_prints_section(mock_resolver_cls, capsys) -> None:
     assert "SECURITY ANALYSIS" not in output
     mock_resolver_cls.return_value.inspect_uri.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")
@@ -1309,6 +1384,8 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["cname_targets"]["checks"] == []
     assert data["soa_ns"]["status"] == "NOT DETECTED"
     assert data["caa"]["status"] == "NOT DETECTED"
+    assert data["cds"]["status"] == "NOT DETECTED"
+    assert data["cds"]["cds_found"] is False
 
 
 @patch("cli.interface.DNSResolver")
@@ -1328,6 +1405,7 @@ def test_cli_format_csv_stdout(mock_resolver_cls, capsys) -> None:
     assert "mail.example.com" not in captured.out
     assert "DNS ANALYZER" not in captured.out
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A",)
     )
@@ -1431,6 +1509,7 @@ def test_cli_nxdomain_exits_one(mock_resolver_cls, capsys) -> None:
     assert run(["missing.example"]) == 1
     assert "does not exist" in capsys.readouterr().err
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cds.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")

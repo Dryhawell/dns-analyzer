@@ -65,6 +65,7 @@ from analyzer.soa import (
     soa_serial,
 )
 from analyzer.caa import CaaObservation, evaluate_caa
+from analyzer.cds import CdsObservation, evaluate_cds, parse_cds, parse_cdnskey
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import (
@@ -761,6 +762,30 @@ class DNSResolver:
             delegations=delegations,
             keys_truncated=keys_truncated,
             delegations_truncated=delegations_truncated,
+        )
+
+    def inspect_cds(self, name: str) -> CdsObservation:
+        """Look for CDS/CDNSKEY. Does not contact the parent or submit DS."""
+        host = name.rstrip(".").lower()
+        client = self._edns_client()
+        errors: list[str] = []
+        cds_found, _, cds_rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "CDS", errors)
+        )
+        cdnskey_found, _, cdnskey_rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "CDNSKEY", errors)
+        )
+        cds, cds_truncated = parse_cds(cds_rdatas)
+        keys, keys_truncated = parse_cdnskey(cdnskey_rdatas)
+        return evaluate_cds(
+            host,
+            cds_found=cds_found,
+            cdnskey_found=cdnskey_found,
+            cds=cds,
+            cdnskey=keys,
+            cds_truncated=cds_truncated,
+            cdnskey_truncated=keys_truncated,
+            error="; ".join(errors) if errors else None,
         )
 
     @staticmethod

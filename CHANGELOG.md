@@ -2,6 +2,24 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.20.0 — 2026-09-14
+
+CDS and CDNSKEY listing. Child-to-parent DS signaling is listed, not submitted.
+
+### Added
+
+- Default / `--security` / `--all` list up to 8 CDS records (algorithm, digest type) and 8 CDNSKEY records (flags, algorithm, KSK/ZSK)
+- CLI/JSON/HTML include `cds` with `cds` and `cdnskey` arrays
+- Findings: `cds_missing` / `cds_unreadable` are info (+0)
+- `--record CDS` and `--record CDNSKEY` are rejected with a hint to use default / `--security`
+
+### Notes
+
+- Missing CDS is common and is not broken DNSSEC
+- This tool does not check that CDS matches DNSKEY or DS
+- This tool does not contact the parent registry or submit a DS update
+- Digest bytes and public key material are not dumped
+
 ## 1.19.0 — 2026-09-14
 
 URI listing. The target is not fetched and service prefixes are not guessed.

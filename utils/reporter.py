@@ -20,6 +20,7 @@ from analyzer.ns import NsHostCheck, NsHostObservation
 from analyzer.cname import CnameTargetCheck, CnameTargetObservation
 from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation, CaaProperty
+from analyzer.cds import CdnskeyRecord, CdsObservation, CdsRecord
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -84,6 +85,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "cname_targets": _cname_targets_dict(result.cname_targets),
         "soa_ns": _soa_ns_dict(result.soa_ns),
         "caa": _caa_dict(result.caa),
+        "cds": _cds_dict(result.cds),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
@@ -482,6 +484,46 @@ def _caa_dict(observation: CaaObservation | None) -> dict[str, object] | None:
     }
 
 
+def _cds_dict(observation: CdsObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "cds_found": observation.cds_found,
+        "cdnskey_found": observation.cdnskey_found,
+        "cds": [_cds_record_dict(item) for item in observation.cds],
+        "cdnskey": [_cdnskey_record_dict(item) for item in observation.cdnskey],
+        "cds_truncated": observation.cds_truncated,
+        "cdnskey_truncated": observation.cdnskey_truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _cds_record_dict(item: CdsRecord) -> dict[str, object]:
+    return {
+        "key_tag": item.key_tag,
+        "algorithm": item.algorithm,
+        "algorithm_meaning": item.algorithm_meaning,
+        "digest_type": item.digest_type,
+        "digest_meaning": item.digest_meaning,
+    }
+
+
+def _cdnskey_record_dict(item: CdnskeyRecord) -> dict[str, object]:
+    return {
+        "flags": item.flags,
+        "protocol": item.protocol,
+        "algorithm": item.algorithm,
+        "algorithm_meaning": item.algorithm_meaning,
+        "role": item.role,
+        "zone_key": item.zone_key,
+        "secure_entry_point": item.secure_entry_point,
+        "key_tag": item.key_tag,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -643,6 +685,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
     parts.extend(_html_errors(result))
     if result.dnssec is not None:
         parts.extend(_html_dnssec(result.dnssec))
+    if result.cds is not None:
+        parts.extend(_html_cds(result.cds))
     if result.spf is not None:
         parts.extend(_html_spf(result.spf))
     if result.dmarc is not None:
@@ -790,6 +834,55 @@ def _html_dnssec(observation: DnssecObservation) -> list[str]:
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    return parts
+
+
+def _html_cds(observation: CdsObservation) -> list[str]:
+    parts = [
+        "<h2>CDS / CDNSKEY</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+        "<ul>",
+        f"<li>CDS: {'found' if observation.cds_found else 'not found'}</li>",
+        f"<li>CDNSKEY: {'found' if observation.cdnskey_found else 'not found'}</li>",
+        "</ul>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No CDS or CDNSKEY records at this name.</p>")
+    if observation.cds:
+        parts.append("<p>CDS:</p>")
+        parts.append("<ul>")
+        for item in observation.cds:
+            parts.append(
+                "<li>"
+                f"{item.key_tag} {item.algorithm} {item.digest_type} "
+                f"({_e(item.algorithm_meaning)}, {_e(item.digest_meaning)})"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.cds_truncated:
+            parts.append(
+                '<p class="note">more than 8 CDS records; extras were not listed.</p>'
+            )
+    if observation.cdnskey:
+        parts.append("<p>CDNSKEY:</p>")
+        parts.append("<ul>")
+        for key in observation.cdnskey:
+            tag = f", key tag {key.key_tag}" if key.key_tag is not None else ""
+            parts.append(
+                "<li>"
+                f"{key.flags} {key.protocol} {key.algorithm} "
+                f"({_e(key.role)}, {_e(key.algorithm_meaning)}{_e(tag)})"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.cdnskey_truncated:
+            parts.append(
+                '<p class="note">more than 8 CDNSKEY records; extras were not listed.</p>'
+            )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
     return parts
 
 
