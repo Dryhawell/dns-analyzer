@@ -20,6 +20,7 @@ from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation
+from analyzer.uri import UriObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -62,7 +63,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA observations."""
 
     def analyze(
         self,
@@ -84,6 +85,7 @@ class SecurityAnalyzer:
         soa_ns: SoaNsObservation | None = None,
         caa: CaaObservation | None = None,
         naptr: NaptrObservation | None = None,
+        uri: UriObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -93,6 +95,8 @@ class SecurityAnalyzer:
         findings.extend(self._srv(srv))
         if naptr is not None:
             findings.extend(self._naptr(naptr))
+        if uri is not None:
+            findings.extend(self._uri(uri))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
@@ -478,6 +482,40 @@ class SecurityAnalyzer:
                         "name. This tool does not guess ENUM or SIP applications."
                     ),
                     code="naptr_missing",
+                )
+            ]
+        return []
+
+    def _uri(self, observation: UriObservation) -> list[SecurityFinding]:
+        if observation.error:
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="URI could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "URI set, and it is not a compromise."
+                    ),
+                    recommendation="Retry the lookup before treating URI as unpublished.",
+                    code="uri_unreadable",
+                )
+            ]
+        if observation.status == "NOT DETECTED":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="URI not published",
+                    description=(
+                        f"No URI record was found at {observation.query_name}. "
+                        "Most names do not publish URI. This is not proof that "
+                        "a service or web path is unused."
+                    ),
+                    recommendation=(
+                        "Use --uri only when you expect URI records at this name. "
+                        "This tool does not guess prefixes such as _http._tcp "
+                        "and does not fetch the target."
+                    ),
+                    code="uri_missing",
                 )
             ]
         return []

@@ -35,6 +35,7 @@ from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.srv import SrvObservation, evaluate_srv
 from analyzer.naptr import NaptrObservation, evaluate_naptr
+from analyzer.uri import UriObservation, evaluate_uri
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt
 from analyzer.validator import DomainValidationError, is_valid_domain, normalize_domain
@@ -75,6 +76,8 @@ __all__ = [
     "evaluate_srv",
     "NaptrObservation",
     "evaluate_naptr",
+    "UriObservation",
+    "evaluate_uri",
     "MtaStsObservation",
     "evaluate_mta_sts",
     "TlsRptObservation",

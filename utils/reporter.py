@@ -34,6 +34,7 @@ from analyzer.security import SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation, NaptrRewrite
+from analyzer.uri import UriObservation, UriTarget
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.version import __version__
 
@@ -86,6 +87,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
+        "uri": _uri_dict(result.uri) if result.uri is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -531,6 +533,27 @@ def _naptr_rewrite_dict(item: NaptrRewrite) -> dict[str, object]:
     }
 
 
+def _uri_dict(observation: UriObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "uris": [_uri_target_dict(item) for item in observation.uris],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _uri_target_dict(item: UriTarget) -> dict[str, object]:
+    return {
+        "priority": item.priority,
+        "weight": item.weight,
+        "target": item.target,
+        "scheme": item.scheme,
+        "scheme_meaning": item.scheme_meaning,
+    }
+
+
 def _security_dict(report: SecurityReport | None) -> dict[str, object] | None:
     if report is None:
         return None
@@ -654,6 +677,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
             parts.extend(_html_srv(item))
     if result.naptr is not None:
         parts.extend(_html_naptr(result.naptr))
+    if result.uri is not None:
+        parts.extend(_html_uri(result.uri))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -1157,6 +1182,46 @@ def _html_naptr(observation: NaptrObservation) -> list[str]:
     if observation.truncated:
         parts.append(
             '<p class="note">more than 8 NAPTR records; extras were not listed.</p>'
+        )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_uri(observation: UriObservation) -> list[str]:
+    parts = [
+        "<h2>URI</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No URI records at this name.</p>")
+    if observation.uris:
+        parts.extend(
+            [
+                "<table>",
+                "<thead><tr><th>Priority</th><th>Weight</th><th>Target</th>"
+                "<th>Scheme</th></tr></thead>",
+                "<tbody>",
+            ]
+        )
+        for item in observation.uris:
+            parts.append(
+                "<tr>"
+                f"<td>{item.priority}</td>"
+                f"<td>{item.weight}</td>"
+                f"<td><code>{_e(item.target)}</code></td>"
+                f"<td><code>{_e(item.scheme)}</code></td>"
+                "</tr>"
+            )
+            parts.append(
+                f"<tr><td colspan=\"4\">{_e(item.scheme_meaning)}</td></tr>"
+            )
+        parts.extend(["</tbody>", "</table>"])
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 URI records; extras were not listed.</p>'
         )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

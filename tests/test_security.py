@@ -570,6 +570,45 @@ def test_naptr_timeout_is_info_unreadable() -> None:
     assert report.risk.value == 0
 
 
+def test_uri_missing_is_info_and_unscored() -> None:
+    from analyzer.risk import WEIGHTS
+    from analyzer.uri import evaluate_uri
+
+    observation = evaluate_uri("example.com", ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        uri=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "uri_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["uri_missing"] == 0
+    assert report.risk.value == 0
+
+
+def test_uri_timeout_is_info_unreadable() -> None:
+    from analyzer.uri import evaluate_uri
+
+    observation = evaluate_uri("example.com", (), error="DNS query timed out.")
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        uri=observation,
+    )
+    unread = next(item for item in report.findings if item.code == "uri_unreadable")
+    assert unread.severity == "info"
+    assert not any(item.code == "uri_missing" for item in report.findings)
+    assert report.risk.value == 0
+
+
 def test_mta_sts_missing_is_info_and_unscored() -> None:
     from analyzer.mtasts import evaluate_mta_sts
     from analyzer.risk import WEIGHTS

@@ -212,3 +212,32 @@ def test_naptr_bytes_fields_and_dot_replacement() -> None:
     assert format_rdata("NAPTR", rdata) == '10 20 "s" "SIP+D2T" "" sip.example.com'
     row = records_from_answer("NAPTR", "example.com", SimpleAnswer(rdata))[0]
     assert dict(row.details)["Replacement"] == "sip.example.com"
+
+
+def test_uri_value_lists_fields() -> None:
+    rdata = DummyRdata(
+        "unused",
+        priority=10,
+        weight=1,
+        target="https://www.example.com/path",
+    )
+    assert format_rdata("URI", rdata) == '10 1 "https://www.example.com/path"'
+    row = records_from_answer("URI", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    assert row.name == "example.com"
+    assert row.priority == 10
+    details = dict(row.details)
+    assert details["Target"] == "https://www.example.com/path"
+    assert "does not fetch" in details["Scheme"]
+    assert "not fetched" in details["Note"]
+
+
+def test_uri_bytes_target() -> None:
+    rdata = DummyRdata(
+        "unused",
+        priority=20,
+        weight=5,
+        target=b"ftp://ftp.example.com/pub",
+    )
+    assert format_rdata("URI", rdata) == '20 5 "ftp://ftp.example.com/pub"'
+    row = records_from_answer("URI", "example.com", SimpleAnswer(rdata))[0]
+    assert dict(row.details)["Target"] == "ftp://ftp.example.com/pub"

@@ -19,6 +19,7 @@ from analyzer.security import SecurityReport
 from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation
+from analyzer.uri import UriObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -57,6 +58,7 @@ class DNSAnalysisResult:
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     naptr: NaptrObservation | None = None
+    uri: UriObservation | None = None
     security: SecurityReport | None = None
     ptr_query: str | None = None
     view_record_types: tuple[str, ...] | None = None

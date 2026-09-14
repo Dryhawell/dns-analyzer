@@ -2,6 +2,23 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.19.0 — 2026-09-14
+
+URI listing. The target is not fetched and service prefixes are not guessed.
+
+### Added
+
+- Opt-in `--uri` lists up to 8 URI records (priority, weight, target, scheme)
+- CLI/JSON/HTML include `uri` only when `--uri` is used
+- Findings: `uri_missing` / `uri_unreadable` are info (+0)
+- `--record URI` is rejected with a hint to use `--uri`
+
+### Notes
+
+- Default / `--security` / `--all` do not query URI unless `--uri` is passed
+- Listing an https/ftp/sip URI is not a fetch, login, or call
+- This tool does not guess prefixes such as `_http._tcp`
+
 ## 1.18.0 — 2026-09-14
 
 NAPTR rewrite listing. The regexp is not executed and ENUM/SIP names are not guessed.

@@ -6,6 +6,7 @@ import ipaddress
 
 from analyzer.models import DNSRecord
 from analyzer.naptr import flags_meaning
+from analyzer.uri import scheme_meaning, uri_scheme
 from analyzer.sshfp import algorithm_meaning, fingerprint_hex, fp_type_meaning
 from analyzer.tlsa import (
     association_hex,
@@ -32,6 +33,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
 
     if rtype == "NAPTR":
         return _format_naptr(rdata)
+
+    if rtype == "URI":
+        return _format_uri(rdata)
 
     if rtype == "TXT":
         strings = getattr(rdata, "strings", None)
@@ -110,6 +114,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         return _srv_details(rdata)
     if rtype == "NAPTR":
         return _naptr_details(rdata)
+    if rtype == "URI":
+        return _uri_details(rdata)
     if rtype == "CAA":
         tag = getattr(rdata, "tag", "")
         if isinstance(tag, bytes):
@@ -138,7 +144,7 @@ def _mx_priority(record_type: str, rdata: object) -> int | None:
         if preference is None:
             return None
         return int(preference)
-    if rtype in {"HTTPS", "SVCB", "SRV"}:
+    if rtype in {"HTTPS", "SVCB", "SRV", "URI"}:
         priority = getattr(rdata, "priority", None)
         if priority is None:
             return None
@@ -230,6 +236,37 @@ def _naptr_string(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value)
+
+
+def _format_uri(rdata: object) -> str:
+    priority = getattr(rdata, "priority", "")
+    weight = getattr(rdata, "weight", "")
+    target = _uri_target(getattr(rdata, "target", ""))
+    return f'{priority} {weight} "{target}"'
+
+
+def _uri_details(rdata: object) -> tuple[tuple[str, str], ...]:
+    target = _uri_target(getattr(rdata, "target", ""))
+    scheme = uri_scheme(target)
+    return (
+        ("Priority", f"{getattr(rdata, 'priority', '')} — lower number is tried first"),
+        (
+            "Weight",
+            f"{getattr(rdata, 'weight', '')} — among the same priority",
+        ),
+        ("Target", target),
+        ("Scheme", f"{scheme} — {scheme_meaning(scheme)}" if scheme else scheme_meaning(scheme)),
+        (
+            "Note",
+            "URI is not fetched; the host inside it is not resolved (RFC 7553 listing only).",
+        ),
+    )
+
+
+def _uri_target(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value).strip('"')
 
 
 def _format_srv(rdata: object) -> str:

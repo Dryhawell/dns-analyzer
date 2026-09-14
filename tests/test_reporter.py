@@ -67,6 +67,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["naptr"] is None
+    assert payload["uri"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -337,6 +338,47 @@ def test_json_and_html_include_naptr() -> None:
                         "NAPTR",
                         "example.com",
                         '10 10 "u" "E2U+sip" "!^.*$!<script>alert(1)</script>!" .',
+                        60,
+                    )
+                ],
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_uri() -> None:
+    from analyzer.uri import evaluate_uri
+
+    observation = evaluate_uri(
+        "example.com",
+        [
+            DNSRecord(
+                "URI",
+                "example.com",
+                '10 1 "https://www.example.com/path"',
+                300,
+            )
+        ],
+    )
+    result = _result(uri=observation)
+    payload = result_to_dict(result)
+    assert payload["uri"]["status"] == "FOUND"
+    assert payload["uri"]["uris"][0]["scheme"] == "https"
+    assert payload["uri"]["uris"][0]["priority"] == 10
+    page = dumps_html(result)
+    assert "https://www.example.com/path" in page
+    assert "https" in page
+    xss = dumps_html(
+        _result(
+            uri=evaluate_uri(
+                "example.com",
+                [
+                    DNSRecord(
+                        "URI",
+                        "example.com",
+                        '10 1 "https://example.com/<script>alert(1)</script>"',
                         60,
                     )
                 ],

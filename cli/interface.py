@@ -61,6 +61,7 @@ from analyzer.security import SecurityAnalyzer, SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation, inspect_spf
 from analyzer.srv import SrvObservation, SrvSpecError, normalize_srv_specs
 from analyzer.naptr import NaptrObservation
+from analyzer.uri import UriObservation
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
@@ -90,6 +91,7 @@ Examples:
   python main.py example.com --dkim google
   python main.py example.com --srv sip
   python main.py example.com --naptr
+  python main.py example.com --uri
   python main.py example.com --format json
   python main.py example.com --format html --output reports/example_com.html
   python main.py example.com --output reports/example_com.json
@@ -102,9 +104,10 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 --naptr is opt-in; ENUM/SIP applications are never guessed.
+--uri is opt-in; the target is not fetched and service prefixes are never guessed.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, or NAPTR is an observation, not proof of compromise.
+MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, or URI is an observation, not proof of compromise.
 Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary are also observations, not hijacking.
 """
 
@@ -174,6 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Repeatable. Other types are not queried. A is always queried first "
             "so NXDOMAIN can abort. PTR is --reverse, not --record PTR. "
             "SRV is --srv, not --record SRV. NAPTR is --naptr, not --record NAPTR. "
+            "URI is --uri, not --record URI. "
             "TLSA is DANE at _443._tcp, not --record TLSA. "
             "SSHFP is in the security view, not --record SSHFP."
         ),
@@ -210,6 +214,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Look up NAPTR at this domain (order, preference, flags, services, "
             "regexp, replacement). The regexp is not executed and ENUM/SIP "
             "names are never guessed."
+        ),
+    )
+    parser.add_argument(
+        "--uri",
+        action="store_true",
+        help=(
+            "Look up URI at this domain (priority, weight, target). "
+            "The target is not fetched and service prefixes such as "
+            "_http._tcp are never guessed."
         ),
     )
     parser.add_argument(
@@ -272,7 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "TLSA", "SSHFP"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "TLSA", "SSHFP"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -289,6 +302,11 @@ def _record_type_error(raw: str) -> str:
         return (
             "NAPTR is opt-in. Use --naptr. This tool does not guess ENUM or SIP "
             "applications, and it does not apply the regexp."
+        )
+    if kind == "URI":
+        return (
+            "URI is opt-in. Use --uri. This tool does not guess prefixes such as "
+            "_http._tcp, and it does not fetch the target."
         )
     if kind == "TLSA":
         return (
@@ -324,9 +342,10 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
         or args.dkim_selectors
         or args.srv_services
         or args.naptr
+        or args.uri
     ):
         return (
-            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr) "
+            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri) "
             "or --reverse, not both."
         )
 
@@ -669,6 +688,7 @@ def _print_lookup(
     soa_ns: SoaNsObservation | None = None,
     caa: CaaObservation | None = None,
     naptr: NaptrObservation | None = None,
+    uri: UriObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -716,6 +736,8 @@ def _print_lookup(
             _print_srv(item)
     if naptr is not None:
         _print_naptr(naptr)
+    if uri is not None:
+        _print_uri(uri)
     if view.show_security:
         if (
             dnssec is None
@@ -1172,6 +1194,33 @@ def _print_naptr(observation: NaptrObservation) -> None:
     print()
 
 
+def _print_uri(observation: UriObservation) -> None:
+    print("URI")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No URI records at this name.")
+    for item in observation.uris:
+        print(f'  {item.priority} {item.weight} "{item.target}"')
+        print(f"Priority: {item.priority} — lower number is tried first")
+        print(f"Weight: {item.weight} — among the same priority")
+        print(f"Target: {item.target}")
+        if item.scheme:
+            print(f"Scheme: {item.scheme} — {item.scheme_meaning}")
+        else:
+            print(f"Scheme: {item.scheme_meaning}")
+        print()
+    if observation.truncated:
+        print("Note: more than 8 URI records; extras were not listed.")
+        print()
+    if observation.error:
+        print(f"Note: {observation.error}")
+        print()
+    print(observation.note)
+    print()
+
+
 def _print_security(report: SecurityReport) -> None:
     print("SECURITY ANALYSIS")
     print("────────────────────────")
@@ -1365,6 +1414,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --dkim google")
     print("       python main.py <domain> --srv sip")
     print("       python main.py <domain> --naptr")
+    print("       python main.py <domain> --uri")
     print("       python main.py <domain> --format json")
     print("       python main.py <domain> --format html --output reports/example.html")
     print("       python main.py <domain> --output reports/example.json")
@@ -1454,6 +1504,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.dkim_selectors
             or args.srv_services
             or args.naptr
+            or args.uri
         )
         if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
@@ -1536,9 +1587,11 @@ def _run(argv: list[str] | None = None) -> int:
     soa_ns = None
     caa = None
     naptr_observation = None
+    uri_observation = None
     try:
+        extra_optin = (1 if args.naptr else 0) + (1 if args.uri else 0)
         if view.show_security:
-            workers = 8 + len(selectors) + len(srv_specs) + (1 if args.naptr else 0)
+            workers = 8 + len(selectors) + len(srv_specs) + extra_optin
             with ThreadPoolExecutor(max_workers=min(8, max(8, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
@@ -1564,6 +1617,9 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_naptr = (
                     pool.submit(resolver.inspect_naptr, domain) if args.naptr else None
                 )
+                fut_uri = (
+                    pool.submit(resolver.inspect_uri, domain) if args.uri else None
+                )
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
                 mta_sts = fut_mtasts.result()
@@ -1583,6 +1639,8 @@ def _run(argv: list[str] | None = None) -> int:
                     srv_observations = tuple(item.result() for item in fut_srv)
                 if fut_naptr is not None:
                     naptr_observation = fut_naptr.result()
+                if fut_uri is not None:
+                    uri_observation = fut_uri.result()
             spf = inspect_spf(lookup.txt, lookup.errors)
             spf = resolver.expand_spf(spf)
             security = SecurityAnalyzer().analyze(
@@ -1604,9 +1662,10 @@ def _run(argv: list[str] | None = None) -> int:
                 soa_ns,
                 caa,
                 naptr=naptr_observation,
+                uri=uri_observation,
             )
-        elif selectors or srv_specs or args.naptr:
-            extra = len(selectors) + len(srv_specs) + (1 if args.naptr else 0)
+        elif selectors or srv_specs or args.naptr or args.uri:
+            extra = len(selectors) + len(srv_specs) + extra_optin
             if extra >= 2:
                 with ThreadPoolExecutor(max_workers=min(8, extra)) as pool:
                     fut_dkim = [
@@ -1620,12 +1679,17 @@ def _run(argv: list[str] | None = None) -> int:
                     fut_naptr = (
                         pool.submit(resolver.inspect_naptr, domain) if args.naptr else None
                     )
+                    fut_uri = (
+                        pool.submit(resolver.inspect_uri, domain) if args.uri else None
+                    )
                     if selectors:
                         dkim_observations = tuple(item.result() for item in fut_dkim)
                     if srv_specs:
                         srv_observations = tuple(item.result() for item in fut_srv)
                     if fut_naptr is not None:
                         naptr_observation = fut_naptr.result()
+                    if fut_uri is not None:
+                        uri_observation = fut_uri.result()
             else:
                 if selectors:
                     dkim_observations = tuple(
@@ -1637,6 +1701,8 @@ def _run(argv: list[str] | None = None) -> int:
                     )
                 if args.naptr:
                     naptr_observation = resolver.inspect_naptr(domain)
+                if args.uri:
+                    uri_observation = resolver.inspect_uri(domain)
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
         _print_dns_failure(exc, domain)
@@ -1684,6 +1750,7 @@ def _run(argv: list[str] | None = None) -> int:
         dkim=dkim_observations,
         srv=srv_observations,
         naptr=naptr_observation,
+        uri=uri_observation,
         security=security,
         view_record_types=_view_record_types(view),
         view_security=view.show_security,
@@ -1722,6 +1789,7 @@ def _run(argv: list[str] | None = None) -> int:
             soa_ns,
             caa,
             naptr_observation,
+            uri_observation,
         )
         if comparison is not None:
             _print_comparison(comparison)

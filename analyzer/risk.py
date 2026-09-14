@@ -47,6 +47,8 @@ WEIGHTS: dict[str, int] = {
     "srv_missing": 0,
     "naptr_unreadable": 0,
     "naptr_missing": 0,
+    "uri_unreadable": 0,
+    "uri_missing": 0,
     "mtasts_unreadable": 0,
     "mtasts_missing": 0,
     "mtasts_multiple": 5,
