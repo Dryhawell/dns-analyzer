@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from analyzer.dmarc import evaluate_dmarc
-from analyzer.dnssec import evaluate_dnssec
+from analyzer.dnssec import DnssecDelegation, DnssecKey, evaluate_dnssec
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.result import DNSAnalysisResult
 from analyzer.security import SecurityAnalyzer
@@ -63,6 +63,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["ns_hosts"] is None
     assert payload["cname_targets"] is None
     assert payload["soa_ns"] is None
+    assert payload["caa"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["security_analysis"] is None
@@ -97,6 +98,66 @@ def test_json_includes_security_and_risk() -> None:
     assert payload["risk_score"]["value"] == 10
     assert payload["risk_score"]["band"] == "LOW"
     assert payload["risk_score"]["contributions"][0]["points"] == 10
+
+
+def test_json_and_html_include_dnssec_algorithms() -> None:
+    observation = evaluate_dnssec(
+        dnskey_found=True,
+        ds_found=True,
+        ad_flag=True,
+        keys=(
+            DnssecKey(
+                flags=257,
+                protocol=3,
+                algorithm=15,
+                algorithm_meaning="Ed25519",
+                role="KSK",
+                zone_key=True,
+                secure_entry_point=True,
+                key_tag=12345,
+            ),
+        ),
+        delegations=(
+            DnssecDelegation(
+                key_tag=12345,
+                algorithm=13,
+                algorithm_meaning="ECDSAP256SHA256",
+                digest_type=2,
+                digest_meaning="SHA-256",
+            ),
+        ),
+    )
+    payload = result_to_dict(_result(dnssec=observation))
+    assert payload["dnssec"]["keys"][0]["algorithm"] == 15
+    assert payload["dnssec"]["keys"][0]["algorithm_meaning"] == "Ed25519"
+    assert payload["dnssec"]["keys"][0]["role"] == "KSK"
+    assert payload["dnssec"]["delegations"][0]["digest_type"] == 2
+    page = dumps_html(_result(dnssec=observation))
+    assert "Ed25519" in page
+    assert "SHA-256" in page
+    xss = dumps_html(
+        _result(
+            dnssec=evaluate_dnssec(
+                dnskey_found=True,
+                ds_found=True,
+                ad_flag=False,
+                keys=(
+                    DnssecKey(
+                        flags=256,
+                        protocol=3,
+                        algorithm=8,
+                        algorithm_meaning="<script>x</script>",
+                        role="ZSK",
+                        zone_key=True,
+                        secure_entry_point=False,
+                        key_tag=1,
+                    ),
+                ),
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
 
 
 def test_dumps_json_is_parseable() -> None:
@@ -616,6 +677,38 @@ def test_json_and_html_include_soa_ns() -> None:
                 "example.com",
                 "<script>x</script>",
                 ("ns1.example.com",),
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_caa_summary() -> None:
+    from analyzer.caa import evaluate_caa
+
+    observation = evaluate_caa(
+        "example.com",
+        [
+            DNSRecord("CAA", "example.com", '0 issue "letsencrypt.org"', 3600),
+            DNSRecord("CAA", "example.com", '0 issuewild "letsencrypt.org"', 3600),
+            DNSRecord("CAA", "example.com", '0 iodef "mailto:caa@example.com"', 3600),
+        ],
+    )
+    result = _result(caa=observation)
+    payload = result_to_dict(result)
+    assert payload["caa"]["status"] == "FOUND"
+    assert payload["caa"]["issue"] == ["letsencrypt.org"]
+    assert payload["caa"]["issuewild"] == ["letsencrypt.org"]
+    assert payload["caa"]["iodef"] == ["mailto:caa@example.com"]
+    page = dumps_html(result)
+    assert "letsencrypt.org" in page
+    assert "mailto:caa@example.com" in page
+    xss = dumps_html(
+        _result(
+            caa=evaluate_caa(
+                "example.com",
+                [DNSRecord("CAA", "example.com", '0 issue "<script>x</script>"', 3600)],
             )
         )
     )

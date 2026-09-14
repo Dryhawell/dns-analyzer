@@ -64,9 +64,16 @@ from analyzer.soa import (
     soa_primary,
     soa_serial,
 )
+from analyzer.caa import CaaObservation, evaluate_caa
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
-from analyzer.dnssec import DnssecObservation, evaluate_dnssec
+from analyzer.dnssec import (
+    MAX_DNSSEC_ITEMS,
+    DnssecObservation,
+    evaluate_dnssec,
+    parse_delegations,
+    parse_dnskeys,
+)
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts, mta_sts_policy_host, mta_sts_query_name
 from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
@@ -654,6 +661,17 @@ class DNSResolver:
             serial=serial,
         )
 
+    def inspect_caa(self, name: str) -> CaaObservation:
+        """Summarize CAA issue / issuewild / iodef. Does not contact CAs."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_caa(host)
+        except DomainNotFoundError:
+            return evaluate_caa(host, ())
+        except DNSQueryError as exc:
+            return evaluate_caa(host, (), error=str(exc))
+        return evaluate_caa(host, records)
+
     def inspect_dkim(self, name: str, selector: str) -> DkimObservation:
         """TXT lookup at <selector>._domainkey.<name>. Does not guess selectors."""
         qname = dkim_query_name(name, selector)
@@ -696,14 +714,34 @@ class DNSResolver:
         client = self._edns_client()
         errors: list[str] = []
         # Sequential on purpose: two queries, and tests mock probe order.
-        dnskey_found, ad_key = self._dnssec_probe(client, name, "DNSKEY", errors)
-        ds_found, ad_ds = self._dnssec_probe(client, name, "DS", errors)
+        dnskey_found, ad_key, dnskey_rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "DNSKEY", errors)
+        )
+        ds_found, ad_ds, ds_rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "DS", errors)
+        )
+        keys, keys_truncated = parse_dnskeys(dnskey_rdatas)
+        delegations, delegations_truncated = parse_delegations(ds_rdatas)
         return evaluate_dnssec(
             dnskey_found=dnskey_found,
             ds_found=ds_found,
             ad_flag=ad_key or ad_ds,
             error="; ".join(errors) if errors else None,
+            keys=keys,
+            delegations=delegations,
+            keys_truncated=keys_truncated,
+            delegations_truncated=delegations_truncated,
         )
+
+    @staticmethod
+    def _unpack_dnssec_probe(
+        result: tuple[object, ...],
+    ) -> tuple[bool, bool, tuple[object, ...]]:
+        """Accept 2-tuple mocks and 3-tuple probes that include rdata."""
+        found = bool(result[0])
+        ad_flag = bool(result[1])
+        records = result[2] if len(result) > 2 else ()
+        return found, ad_flag, tuple(records) if records else ()
 
     def _dnssec_probe(
         self,
@@ -711,32 +749,48 @@ class DNSResolver:
         name: str,
         rdtype: str,
         errors: list[str],
-    ) -> tuple[bool, bool]:
+    ) -> tuple[bool, bool, tuple[object, ...]]:
         _log.info("Querying %s record for %s", rdtype, name)
         try:
             answer = client.resolve(name, rdtype, search=False)
         except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
-            return False, False
+            return False, False, ()
         except (dns.resolver.LifetimeTimeout, dns.exception.Timeout):
             _log.warning("DNS query timeout for %s %s", rdtype, name)
             errors.append(f"{rdtype} query timed out")
-            return False, False
+            return False, False, ()
         except dns.resolver.NoNameservers:
             _log.warning("No nameservers for %s %s", rdtype, name)
             errors.append(f"{rdtype} query had no nameservers")
-            return False, False
+            return False, False, ()
         except OSError:
             _log.warning("Network error for %s %s", rdtype, name)
             errors.append(f"{rdtype} query had a network error")
-            return False, False
+            return False, False, ()
         except dns.exception.DNSException:
             _log.warning("DNS query failed for %s %s", rdtype, name)
             errors.append(f"{rdtype} query failed")
-            return False, False
+            return False, False, ()
 
         response = getattr(answer, "response", None)
         ad_flag = bool(response is not None and (response.flags & dns.flags.AD))
-        return True, ad_flag
+        return True, ad_flag, self._probe_rdatas(answer)
+
+    def _probe_rdatas(self, answer: object) -> tuple[object, ...]:
+        """Collect rdata from a real Answer. MagicMock answers yield nothing."""
+        collected: list[object] = []
+        try:
+            iterator = iter(answer)
+        except TypeError:
+            return ()
+        for rdata in iterator:
+            algorithm = getattr(rdata, "algorithm", None)
+            if not isinstance(algorithm, int):
+                break
+            collected.append(rdata)
+            if len(collected) >= MAX_DNSSEC_ITEMS + 1:
+                break
+        return tuple(collected)
 
     def _edns_client(self) -> dns.resolver.Resolver:
         """EDNS client for DNSSEC probes. Reuse nameservers; skip resolv.conf."""

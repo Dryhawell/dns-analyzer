@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from analyzer.bimi import BimiObservation
 from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
-from analyzer.dnssec import DnssecObservation
+from analyzer.dnssec import SHA1_DS_DIGEST, SHA1_ERA_ALGORITHMS, DnssecObservation
 from analyzer.models import CoreLookup
 from analyzer.mtasts import MtaStsObservation
 from analyzer.records import describe_ip_scope
@@ -24,6 +24,7 @@ from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
 from analyzer.cname import CnameTargetObservation
 from analyzer.soa import SoaNsObservation
+from analyzer.caa import CaaObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -60,7 +61,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA observations."""
 
     def analyze(
         self,
@@ -80,6 +81,7 @@ class SecurityAnalyzer:
         ns_hosts: NsHostObservation | None = None,
         cname_targets: CnameTargetObservation | None = None,
         soa_ns: SoaNsObservation | None = None,
+        caa: CaaObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -105,7 +107,10 @@ class SecurityAnalyzer:
             findings.extend(self._ns_hosts(ns_hosts))
         if soa_ns is not None:
             findings.extend(self._soa_ns(soa_ns))
-        findings.extend(self._caa(lookup))
+        if caa is not None:
+            findings.extend(self._caa_observation(caa))
+        else:
+            findings.extend(self._caa(lookup))
         findings.extend(self._addresses(lookup))
         if cname_targets is not None:
             findings.extend(self._cname_targets(cname_targets))
@@ -121,7 +126,42 @@ class SecurityAnalyzer:
 
     def _dnssec(self, dnssec: DnssecObservation) -> list[SecurityFinding]:
         if dnssec.status == "DETECTED":
-            return []
+            findings: list[SecurityFinding] = []
+            if any(key.algorithm in SHA1_ERA_ALGORITHMS for key in dnssec.keys):
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title="DNSKEY uses a SHA-1-era algorithm",
+                        description=(
+                            "At least one DNSKEY uses algorithm 1, 3, 5, 6, or 7 "
+                            "(MD5/SHA-1 era). That is a deprecated algorithm family, "
+                            "not proof that the zone is compromised."
+                        ),
+                        recommendation=(
+                            "Operators typically migrate to RSA/SHA-256, ECDSA, or "
+                            "Ed25519. This listing is not a chain-of-trust validation."
+                        ),
+                        code="dnssec_sha1_algorithm",
+                    )
+                )
+            if any(item.digest_type == SHA1_DS_DIGEST for item in dnssec.delegations):
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title="DS uses SHA-1 digest",
+                        description=(
+                            "A DS record uses digest type 1 (SHA-1). That digest is "
+                            "deprecated. It is not a compromise and this tool does "
+                            "not validate the delegation."
+                        ),
+                        recommendation=(
+                            "Prefer DS digest type 2 (SHA-256) at the parent. "
+                            "SHA-1 DS is an observation, not a breach."
+                        ),
+                        code="dnssec_sha1_ds",
+                    )
+                )
+            return findings
         if dnssec.error:
             return []
         return [
@@ -1008,11 +1048,32 @@ class SecurityAnalyzer:
             )
         return findings
 
+    def _caa_observation(self, observation: CaaObservation) -> list[SecurityFinding]:
+        if observation.status == "UNREADABLE":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CAA could not be read",
+                    description=(
+                        "CAA lookup timed out or failed. A timeout is not a missing "
+                        "policy, and it is not a compromise."
+                    ),
+                    recommendation="Retry the CAA lookup before treating the name as unpublished.",
+                    code="caa_unreadable",
+                )
+            ]
+        if observation.status == "NOT DETECTED":
+            return self._caa_missing()
+        return []
+
     def _caa(self, lookup: CoreLookup) -> list[SecurityFinding]:
         if any(label == "CAA" for label, _ in lookup.errors):
             return []
         if lookup.caa:
             return []
+        return self._caa_missing()
+
+    def _caa_missing(self) -> list[SecurityFinding]:
         return [
             SecurityFinding(
                 severity="info",

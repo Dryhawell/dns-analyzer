@@ -2,6 +2,40 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.17.0 — 2026-09-14
+
+CAA issue / issuewild / iodef listing. Certificate authorities are not contacted.
+
+### Added
+
+- Default / `--security` / `--all` summarize up to 8 CAA properties (`issue`, `issuewild`, `iodef`)
+- CLI/JSON/HTML include `caa` with property flags, tag meaning, and grouped values
+- Findings: `caa_unreadable` is info (+0); missing CAA stays `caa_missing` (+2)
+
+### Notes
+
+- Listing a CA name is not proof that a certificate was issued
+- This tool does not talk to CAs or check Certificate Transparency logs
+- `;` as an issue value means no CA is authorized for that property
+- CAs may walk to a parent name when this name has no CAA
+
+## 1.16.0 — 2026-09-13
+
+DNSKEY and DS algorithm listing. The chain to the IANA root is not validated.
+
+### Added
+
+- Default / `--security` / `--all` list up to 8 DNSKEY records (flags, algorithm, KSK/ZSK, key tag)
+- DS delegations show algorithm and digest type (digest bytes are not dumped)
+- CLI/JSON/HTML include `keys` and `delegations`
+- Findings: `dnssec_sha1_algorithm` / `dnssec_sha1_ds` are info (+0)
+
+### Notes
+
+- DETECTED / NOT DETECTED is unchanged: still DNSKEY or DS visible to this resolver
+- Listing RSA/SHA-1 or SHA-1 DS is not a compromise
+- This tool does not validate signatures or the parent chain
+
 ## 1.15.0 — 2026-09-13
 
 SOA primary vs NS set. Zone transfer is not attempted.

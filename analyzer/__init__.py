@@ -6,11 +6,17 @@ from analyzer.mx import MxHostObservation, evaluate_mx_hosts
 from analyzer.ns import NsHostObservation, evaluate_ns_hosts
 from analyzer.cname import CnameTargetObservation, evaluate_cname_targets
 from analyzer.soa import SoaNsObservation, evaluate_soa_ns
+from analyzer.caa import CaaObservation, evaluate_caa
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa
 from analyzer.dmarc import DmarcObservation, evaluate_dmarc
 from analyzer.dkim import DkimObservation, evaluate_dkim
-from analyzer.dnssec import DnssecObservation
+from analyzer.dnssec import (
+    DnssecDelegation,
+    DnssecKey,
+    DnssecObservation,
+    evaluate_dnssec,
+)
 from analyzer.exceptions import (
     DNSQueryError,
     DNSNetworkError,
@@ -36,6 +42,9 @@ from analyzer.version import __version__
 __all__ = [
     "__version__",
     "DnssecObservation",
+    "DnssecKey",
+    "DnssecDelegation",
+    "evaluate_dnssec",
     "CoreLookup",
     "DNSQueryError",
     "DNSNetworkError",
@@ -83,4 +92,6 @@ __all__ = [
     "evaluate_cname_targets",
     "SoaNsObservation",
     "evaluate_soa_ns",
+    "CaaObservation",
+    "evaluate_caa",
 ]

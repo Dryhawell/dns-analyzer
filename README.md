@@ -2,7 +2,7 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.15.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.17.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV) are observations, not automatic proof of compromise.
 
@@ -51,7 +51,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - Query only the types you asked for (`--record`); A is still queried first so NXDOMAIN can abort
 - Controlled parallelism after A (dnspython `Resolver` is locked; it is not thread-safe)
 - TTL display (cache lifetime, never a security score)
-- DNSSEC **detection** (DNSKEY / DS / AD flag), not a full chain-of-trust validator
+- DNSSEC **detection** (DNSKEY / DS / AD flag) plus DNSKEY/DS algorithm labels, not a full chain-of-trust validator
 - SPF and DMARC parsing from TXT; `include:` followed one hop; DKIM and SRV are opt-in
 - MTA-STS TXT at `_mta-sts` (RFC 8461); the HTTPS policy file is not fetched
 - TLS-RPT TXT at `_smtp._tls` (RFC 8460); SMTP is not probed
@@ -63,7 +63,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - NS host A/AAAA; AXFR is not attempted
 - CNAME target A/AAAA (up to 5 hops); HTTP is not fetched
 - SOA mname vs NS set; AXFR is not attempted
-- CAA inspection
+- CAA inspection plus issue / issuewild / iodef summary (RFC 8659); CAs and CT logs are not contacted
 - HTTPS / SVCB (RFC 9460) — ALPN, port, ECH presence; not an HTTP scanner
 - Reverse DNS (`PTR`)
 - Security findings with severity, description, recommendation, and a stable `code`
@@ -175,9 +175,9 @@ python main.py --version
 
 | Mode | What you get |
 | --- | --- |
-| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, findings, risk score |
+| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, findings, risk score |
 | `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
-| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / SSHFP / FCrDNS / MX hosts / NS hosts / CNAME targets / SOA/NS / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB dump; MX, NS, and SOA are still queried for host/primary checks) |
+| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / SSHFP / FCrDNS / MX hosts / NS hosts / CNAME targets / SOA/NS / CAA summary / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB dump; MX, NS, and SOA are still queried for host/primary checks) |
 | `--dkim SELECTOR` | TXT at `SELECTOR._domainkey.<domain>`. Repeatable (max 8). Never guessed |
 | `--srv SERVICE` | SRV at `_SERVICE._tcp.<domain>` (or `SERVICE/udp`). Repeatable (max 8). Never guessed |
 | `--record A --security` | That type plus the security sections |
@@ -187,7 +187,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.15.0` and exit |
+| `--version` | Print `dns-analyzer 1.17.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -360,11 +360,11 @@ DNSSEC signs DNS data so a **validating resolver** can check integrity (the answ
 
 This tool reports:
 
-- **DNSKEY** — the zone publishes signing keys
-- **DS** — the parent zone has a hash of those keys (chain toward the root)
+- **DNSKEY** — the zone publishes signing keys (flags, algorithm, KSK/ZSK role, key tag)
+- **DS** — the parent zone has a hash of those keys (algorithm + digest type; digest bytes are not dumped)
 - **AD flag** — whether *your* recursive resolver marked the answer as authenticated
 
-`DETECTED` means those signals were visible **to this resolver**. It is **not** a full validation against the IANA root key. `NOT DETECTED` does not mean the domain is compromised — many ISP resolvers hide DNSSEC records or never set AD.
+`DETECTED` means those signals were visible **to this resolver**. It is **not** a full validation against the IANA root key. Algorithm names are labels from this answer, not proof that the chain is valid. `NOT DETECTED` does not mean the domain is compromised — many ISP resolvers hide DNSSEC records or never set AD. A SHA-1-era algorithm (5 / 7) is listed as info, not a breach.
 
 ---
 
@@ -430,9 +430,17 @@ Default protocol is **tcp**. Use `sip/udp` for UDP. `FOUND` lists priority (lowe
 
 ## CAA
 
-**CAA** (Certification Authority Authorization) says which CAs may issue certificates for the name (`issue` / `issuewild` / `iodef`).
+**CAA** (Certification Authority Authorization, RFC 8659) says which CAs may issue certificates for the name.
 
-No CAA record is common. CAs may look at parent names. Absence is a **low-weight** observation here, not “the domain is hijacked”. This tool does not talk to CAs or check CT logs.
+Default / `--security` / `--all` summarize the published properties:
+
+- **issue** — CAs allowed to issue for this name (`;` means none)
+- **issuewild** — CAs allowed to issue wildcard certificates
+- **iodef** — where a CA may send a policy-violation report (mailto or https URI)
+
+This tool **does not** talk to CAs or check Certificate Transparency logs. Listing `letsencrypt.org` is not proof that a certificate was issued. An unknown tag is labeled, not treated as a breach. The Issuer Critical flag (128) is shown; it is not a compromise grade.
+
+No CAA record is common. CAs may look at parent names. Absence is a **low-weight** observation here (`caa_missing`, **+2**), not “the domain is hijacked”. A CAA timeout is unread (`caa_unreadable`, **+0**), not missing.
 
 **HTTPS** and **SVCB** (RFC 9460) are separate DNS types. They tell a client which protocols, ports, or Encrypted Client Hello (ECH) config this name advertises. A missing HTTPS record is not “the site is down”. This tool does not fetch web pages.
 
@@ -464,7 +472,7 @@ dns-analyzer/
 │   ├── models.py                # DNSRecord, CoreLookup
 │   ├── reverse.py               # IP → PTR name
 │   ├── ttl.py                   # cache-lifetime wording
-│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py / sshfp.py / fcrdns.py / mx.py / ns.py / cname.py / soa.py
+│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py / sshfp.py / fcrdns.py / mx.py / ns.py / cname.py / soa.py / caa.py
 │   ├── security.py / risk.py
 │   ├── config.py / compare.py   # named resolvers, A/AAAA diff
 │   └── result.py                # one run, ready to export
@@ -486,7 +494,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA formatting, DNSSEC evaluation, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA formatting and issue/issuewild/iodef listing, DNSSEC evaluation and DNSKEY/DS algorithm listing, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -497,7 +505,7 @@ If a test needs the network, it does not belong in this suite.
 - Not a vulnerability scanner
 - Absence of DNSSEC / SPF / DMARC / CAA is a signal, not automatic critical risk
 - Missing HTTPS/SVCB is common and is not scored
-- DNSSEC here is **visibility to this resolver**, not validation to the IANA root
+- DNSSEC here is **visibility to this resolver**, not validation to the IANA root; algorithm listing is not a crypto audit
 - SPF `include:` / `redirect=` are followed one hop; nested include: and a/mx/ptr/exists are not evaluated
 - DKIM selectors are **opt-in** (`--dkim`); they are never brute-forced or guessed
 - SRV services are **opt-in** (`--srv`); they are never brute-forced or guessed
@@ -511,6 +519,7 @@ If a test needs the network, it does not belong in this suite.
 - NS host lookup is DNS-only (A/AAAA of the NS target); AXFR is not attempted; missing address is not lame-server proof
 - CNAME target lookup is DNS-only (A/AAAA at the end of the alias chain); HTTP is not fetched; a missing target is not takeover
 - SOA/NS comparison is DNS-only; a hidden primary is not hijacking; AXFR is not attempted
+- CAA summary is DNS-only (issue / issuewild / iodef); CAs and CT logs are not contacted; missing CAA is not a hijack
 - Documentation addresses (`192.0.2.0/24`, `2001:db8::/32`, …) are labeled, not scored as private LAN
 - The risk score is a local heuristic, not a security standard
 - Different answers from two resolvers are not proof of hijacking
@@ -527,7 +536,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.15.0** adds SOA primary vs NS comparison. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.17.0** lists CAA issue / issuewild / iodef. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

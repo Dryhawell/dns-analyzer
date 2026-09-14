@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from analyzer.dmarc import evaluate_dmarc
-from analyzer.dnssec import evaluate_dnssec
+from analyzer.dnssec import DnssecDelegation, DnssecKey, evaluate_dnssec
 from analyzer.exceptions import DNSTimeoutError, DomainNotFoundError
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.bimi import evaluate_bimi
@@ -16,6 +16,7 @@ from analyzer.mx import evaluate_mx_hosts
 from analyzer.ns import evaluate_ns_hosts
 from analyzer.cname import evaluate_cname_targets
 from analyzer.soa import evaluate_soa_ns
+from analyzer.caa import evaluate_caa
 from analyzer.sshfp import evaluate_sshfp
 from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
@@ -56,11 +57,15 @@ def _dnssec(
     dnskey_found: bool = False,
     ds_found: bool = False,
     ad_flag: bool = False,
+    keys=(),
+    delegations=(),
 ):
     return evaluate_dnssec(
         dnskey_found=dnskey_found,
         ds_found=ds_found,
         ad_flag=ad_flag,
+        keys=keys,
+        delegations=delegations,
     )
 
 
@@ -162,6 +167,10 @@ def _soa_ns() -> object:
     return evaluate_soa_ns("example.com", None, ())
 
 
+def _caa() -> object:
+    return evaluate_caa("example.com", ())
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -177,6 +186,7 @@ def _bind(
     ns_hosts=None,
     cname_targets=None,
     soa_ns=None,
+    caa=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -193,6 +203,7 @@ def _bind(
         cname_targets or _cname_targets()
     )
     mock_cls.return_value.inspect_soa_ns.return_value = soa_ns or _soa_ns()
+    mock_cls.return_value.inspect_caa.return_value = caa or _caa()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -427,6 +438,48 @@ def test_cli_prints_dnssec_detected(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_dnssec_key_algorithms(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        dnssec=_dnssec(
+            dnskey_found=True,
+            ds_found=True,
+            ad_flag=True,
+            keys=(
+                DnssecKey(
+                    flags=257,
+                    protocol=3,
+                    algorithm=15,
+                    algorithm_meaning="Ed25519",
+                    role="KSK",
+                    zone_key=True,
+                    secure_entry_point=True,
+                    key_tag=12345,
+                ),
+            ),
+            delegations=(
+                DnssecDelegation(
+                    key_tag=12345,
+                    algorithm=13,
+                    algorithm_meaning="ECDSAP256SHA256",
+                    digest_type=2,
+                    digest_meaning="SHA-256",
+                ),
+            ),
+        ),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "257 3 15" in output
+    assert "Ed25519" in output
+    assert "KSK" in output
+    assert "SHA-256" in output
+    assert "ECDSAP256SHA256" in output
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_dmarc_reject(mock_resolver_cls, capsys) -> None:
     _bind(
         mock_resolver_cls,
@@ -653,6 +706,32 @@ def test_cli_prints_soa_ns(mock_resolver_cls, capsys) -> None:
 
 
 @patch("cli.interface.DNSResolver")
+def test_cli_prints_caa_summary(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        caa=evaluate_caa(
+            "example.com",
+            [
+                DNSRecord("CAA", "example.com", '0 issue "letsencrypt.org"', 3600),
+                DNSRecord("CAA", "example.com", '0 issuewild "letsencrypt.org"', 3600),
+                DNSRecord(
+                    "CAA", "example.com", '0 iodef "mailto:caa@example.com"', 3600
+                ),
+            ],
+        ),
+    )
+
+    assert run(["example.com"]) == 0
+    output = capsys.readouterr().out
+    assert "issue: letsencrypt.org" in output
+    assert "issuewild: letsencrypt.org" in output
+    assert "iodef: mailto:caa@example.com" in output
+    assert "Status: FOUND" in output
+    mock_resolver_cls.return_value.inspect_caa.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
 def test_cli_prints_spf_include_hop(mock_resolver_cls, capsys) -> None:
     from dataclasses import replace
 
@@ -756,6 +835,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_ns_hosts.assert_not_called()
     mock_resolver_cls.return_value.inspect_cname_targets.assert_not_called()
     mock_resolver_cls.return_value.inspect_soa_ns.assert_not_called()
+    mock_resolver_cls.return_value.inspect_caa.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -1080,6 +1160,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["ns_hosts"]["checks"] == []
     assert data["cname_targets"]["checks"] == []
     assert data["soa_ns"]["status"] == "NOT DETECTED"
+    assert data["caa"]["status"] == "NOT DETECTED"
 
 
 @patch("cli.interface.DNSResolver")

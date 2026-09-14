@@ -25,6 +25,8 @@ SCORE_NOTE = (
 # Points added per finding code. Missing DNSSEC stays small on purpose.
 WEIGHTS: dict[str, int] = {
     "dnssec_not_detected": 5,
+    "dnssec_sha1_algorithm": 0,
+    "dnssec_sha1_ds": 0,
     "spf_unreadable": 0,
     "spf_missing": 8,
     "spf_multiple": 16,
@@ -36,6 +38,7 @@ WEIGHTS: dict[str, int] = {
     "dmarc_multiple": 16,
     "dmarc_p_none": 5,
     "caa_missing": 2,
+    "caa_unreadable": 0,
     "dkim_unreadable": 0,
     "dkim_selector_missing": 0,
     "dkim_revoked": 8,

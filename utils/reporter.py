@@ -19,12 +19,13 @@ from analyzer.mx import MxHostCheck, MxHostObservation
 from analyzer.ns import NsHostCheck, NsHostObservation
 from analyzer.cname import CnameTargetCheck, CnameTargetObservation
 from analyzer.soa import SoaNsObservation
+from analyzer.caa import CaaObservation, CaaProperty
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
 from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation
-from analyzer.dnssec import DnssecObservation
+from analyzer.dnssec import DnssecDelegation, DnssecKey, DnssecObservation
 from analyzer.models import DNSRecord
 from analyzer.mtasts import MtaStsObservation
 from analyzer.result import DNSAnalysisResult
@@ -80,6 +81,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "ns_hosts": _ns_hosts_dict(result.ns_hosts),
         "cname_targets": _cname_targets_dict(result.cname_targets),
         "soa_ns": _soa_ns_dict(result.soa_ns),
+        "caa": _caa_dict(result.caa),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -174,6 +176,33 @@ def _dnssec_dict(observation: DnssecObservation | None) -> dict[str, object] | N
         "ad_flag": observation.ad_flag,
         "note": observation.note,
         "error": observation.error,
+        "keys": [_dnssec_key_dict(item) for item in observation.keys],
+        "delegations": [_dnssec_ds_dict(item) for item in observation.delegations],
+        "keys_truncated": observation.keys_truncated,
+        "delegations_truncated": observation.delegations_truncated,
+    }
+
+
+def _dnssec_key_dict(item: DnssecKey) -> dict[str, object]:
+    return {
+        "flags": item.flags,
+        "protocol": item.protocol,
+        "algorithm": item.algorithm,
+        "algorithm_meaning": item.algorithm_meaning,
+        "role": item.role,
+        "zone_key": item.zone_key,
+        "secure_entry_point": item.secure_entry_point,
+        "key_tag": item.key_tag,
+    }
+
+
+def _dnssec_ds_dict(item: DnssecDelegation) -> dict[str, object]:
+    return {
+        "key_tag": item.key_tag,
+        "algorithm": item.algorithm,
+        "algorithm_meaning": item.algorithm_meaning,
+        "digest_type": item.digest_type,
+        "digest_meaning": item.digest_meaning,
     }
 
 
@@ -423,6 +452,32 @@ def _soa_ns_dict(observation: SoaNsObservation | None) -> dict[str, object] | No
     }
 
 
+def _caa_property_dict(item: CaaProperty) -> dict[str, object]:
+    return {
+        "flags": item.flags,
+        "issuer_critical": item.issuer_critical,
+        "tag": item.tag,
+        "tag_meaning": item.tag_meaning,
+        "value": item.value,
+    }
+
+
+def _caa_dict(observation: CaaObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "properties": [_caa_property_dict(item) for item in observation.properties],
+        "issue": list(observation.issue),
+        "issuewild": list(observation.issuewild),
+        "iodef": list(observation.iodef),
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -564,6 +619,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_cname_targets(result.cname_targets))
     if result.soa_ns is not None:
         parts.extend(_html_soa_ns(result.soa_ns))
+    if result.caa is not None:
+        parts.extend(_html_caa(result.caa))
     if result.dkim:
         for item in result.dkim:
             parts.extend(_html_dkim(item))
@@ -646,8 +703,39 @@ def _html_dnssec(observation: DnssecObservation) -> list[str]:
         f"<li>DS: {'found' if observation.ds_found else 'not found'}</li>",
         f"<li>AD flag: {'set' if observation.ad_flag else 'not set'} (this resolver)</li>",
         "</ul>",
-        f"<p class=\"note\">{_e(observation.note)}</p>",
     ]
+    if observation.keys:
+        parts.append("<p>Keys:</p>")
+        parts.append("<ul>")
+        for key in observation.keys:
+            tag = f", key tag {key.key_tag}" if key.key_tag is not None else ""
+            parts.append(
+                "<li>"
+                f"{key.flags} {key.protocol} {key.algorithm} "
+                f"({_e(key.role)}, {_e(key.algorithm_meaning)}{_e(tag)})"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.keys_truncated:
+            parts.append(
+                '<p class="note">more than 8 DNSKEY records; extras were not listed.</p>'
+            )
+    if observation.delegations:
+        parts.append("<p>Delegations (DS):</p>")
+        parts.append("<ul>")
+        for item in observation.delegations:
+            parts.append(
+                "<li>"
+                f"{item.key_tag} {item.algorithm} {item.digest_type} "
+                f"({_e(item.algorithm_meaning)}, {_e(item.digest_meaning)})"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.delegations_truncated:
+            parts.append(
+                '<p class="note">more than 8 DS records; extras were not listed.</p>'
+            )
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     return parts
@@ -911,6 +999,42 @@ def _html_soa_ns(observation: SoaNsObservation) -> list[str]:
         parts.append(f"<p>NS: <code>{_e(', '.join(observation.ns_hosts))}</code></p>")
     elif observation.status == "NO NS":
         parts.append("<p>No NS records at this name.</p>")
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_caa(observation: CaaObservation) -> list[str]:
+    parts = [
+        "<h2>CAA</h2>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No CAA records at this name.</p>")
+    if observation.issue:
+        parts.append(f"<p>issue: <code>{_e(', '.join(observation.issue))}</code></p>")
+    if observation.issuewild:
+        parts.append(
+            f"<p>issuewild: <code>{_e(', '.join(observation.issuewild))}</code></p>"
+        )
+    if observation.iodef:
+        parts.append(f"<p>iodef: <code>{_e(', '.join(observation.iodef))}</code></p>")
+    if observation.properties:
+        parts.append("<ul>")
+        for item in observation.properties:
+            critical = ", issuer critical" if item.issuer_critical else ""
+            parts.append(
+                "<li>"
+                f'{item.flags} {_e(item.tag)} "{_e(item.value)}" '
+                f"({_e(item.tag_meaning)}{_e(critical)})"
+                "</li>"
+            )
+        parts.append("</ul>")
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 CAA records; extras were not listed.</p>'
+        )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

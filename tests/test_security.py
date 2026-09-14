@@ -1,5 +1,6 @@
 """DNSSEC observation and security analyzer tests. No network access."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import dns.exception
@@ -7,7 +8,7 @@ import dns.flags
 import dns.resolver
 
 from analyzer.dmarc import evaluate_dmarc
-from analyzer.dnssec import evaluate_dnssec
+from analyzer.dnssec import DnssecDelegation, DnssecKey, evaluate_dnssec
 from analyzer.models import CoreLookup, DNSRecord
 from analyzer.resolver import DNSResolver
 from analyzer.security import SecurityAnalyzer
@@ -51,10 +52,11 @@ def test_dnssec_probe_timeout_is_not_found() -> None:
     client.resolve.side_effect = dns.exception.Timeout()
     errors: list[str] = []
 
-    found, ad_flag = resolver._dnssec_probe(client, "example.com", "DNSKEY", errors)
+    found, ad_flag, records = resolver._dnssec_probe(client, "example.com", "DNSKEY", errors)
 
     assert found is False
     assert ad_flag is False
+    assert records == ()
     assert errors == ["DNSKEY query timed out"]
 
 
@@ -65,10 +67,11 @@ def test_dnssec_probe_reads_ad_flag() -> None:
     client = MagicMock()
     client.resolve.return_value = answer
 
-    found, ad_flag = resolver._dnssec_probe(client, "example.com", "DS", [])
+    found, ad_flag, records = resolver._dnssec_probe(client, "example.com", "DS", [])
 
     assert found is True
     assert ad_flag is True
+    assert records == ()
     client.resolve.assert_called_once_with("example.com", "DS", search=False)
 
 
@@ -80,11 +83,121 @@ def test_dnssec_probe_noanswer() -> None:
     )
     errors: list[str] = []
 
-    found, ad_flag = resolver._dnssec_probe(client, "example.com", "DNSKEY", errors)
+    found, ad_flag, records = resolver._dnssec_probe(client, "example.com", "DNSKEY", errors)
 
     assert found is False
     assert ad_flag is False
+    assert records == ()
     assert errors == []
+
+
+def _dnssec_key(**overrides) -> DnssecKey:
+    values = {
+        "flags": 257,
+        "protocol": 3,
+        "algorithm": 15,
+        "algorithm_meaning": "Ed25519",
+        "role": "KSK",
+        "zone_key": True,
+        "secure_entry_point": True,
+        "key_tag": 12345,
+    }
+    values.update(overrides)
+    return DnssecKey(**values)
+
+
+def _dnssec_ds(**overrides) -> DnssecDelegation:
+    values = {
+        "key_tag": 2371,
+        "algorithm": 13,
+        "algorithm_meaning": "ECDSAP256SHA256",
+        "digest_type": 2,
+        "digest_meaning": "SHA-256",
+    }
+    values.update(overrides)
+    return DnssecDelegation(**values)
+
+
+def test_evaluate_dnssec_lists_key_algorithms() -> None:
+    observation = evaluate_dnssec(
+        dnskey_found=True,
+        ds_found=True,
+        ad_flag=True,
+        keys=(_dnssec_key(),),
+        delegations=(_dnssec_ds(),),
+    )
+    assert observation.status == "DETECTED"
+    assert observation.keys[0].algorithm == 15
+    assert observation.keys[0].algorithm_meaning == "Ed25519"
+    assert observation.keys[0].role == "KSK"
+    assert observation.delegations[0].digest_type == 2
+    assert observation.delegations[0].digest_meaning == "SHA-256"
+
+
+def test_inspect_dnssec_parses_key_algorithms() -> None:
+    resolver = DNSResolver(timeout=1.0)
+    key = SimpleNamespace(flags=257, protocol=3, algorithm=15)
+    ds = SimpleNamespace(key_tag=2371, algorithm=13, digest_type=2)
+    resolver._dnssec_probe = MagicMock(  # type: ignore[method-assign]
+        side_effect=[(True, False, (key,)), (True, True, (ds,))]
+    )
+
+    observation = resolver.inspect_dnssec("example.com")
+
+    assert observation.status == "DETECTED"
+    assert observation.keys[0].algorithm == 15
+    assert "Ed25519" in observation.keys[0].algorithm_meaning
+    assert observation.keys[0].role == "KSK"
+    assert observation.delegations[0].digest_type == 2
+    assert "SHA-256" in observation.delegations[0].digest_meaning
+
+
+def test_dnssec_probe_collects_integer_rdatas() -> None:
+    resolver = DNSResolver(timeout=1.0)
+    key = SimpleNamespace(flags=256, protocol=3, algorithm=8)
+
+    class _Answer:
+        def __init__(self) -> None:
+            self.response = SimpleNamespace(flags=0)
+
+        def __iter__(self):
+            return iter([key])
+
+    client = MagicMock()
+    client.resolve.return_value = _Answer()
+
+    found, ad_flag, records = resolver._dnssec_probe(client, "example.com", "DNSKEY", [])
+
+    assert found is True
+    assert ad_flag is False
+    assert records == (key,)
+
+
+def test_sha1_dnskey_algorithm_is_info_not_compromise() -> None:
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(
+            dnskey_found=True,
+            ds_found=True,
+            ad_flag=True,
+            keys=(_dnssec_key(algorithm=5, algorithm_meaning="RSA/SHA-1", role="ZSK"),),
+            delegations=(_dnssec_ds(digest_type=1, digest_meaning="SHA-1"),),
+        ),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+    )
+    codes = [item.code for item in report.findings]
+    assert "dnssec_sha1_algorithm" in codes
+    assert "dnssec_sha1_ds" in codes
+    algo = next(item for item in report.findings if item.code == "dnssec_sha1_algorithm")
+    digest = next(item for item in report.findings if item.code == "dnssec_sha1_ds")
+    assert algo.severity == "info"
+    assert digest.severity == "info"
+    assert "not proof" in algo.description.lower()
+    assert "compromised" in algo.description.lower()
+    assert report.risk.value == 0
 
 
 def _lookup(
@@ -1046,6 +1159,72 @@ def test_soa_ns_aligned_adds_no_points() -> None:
         soa_ns=observation,
     )
     assert not any(item.code.startswith("soa_") for item in report.findings)
+    assert report.risk.value == 0
+
+
+def test_caa_observation_found_adds_no_points() -> None:
+    from analyzer.caa import evaluate_caa
+
+    observation = evaluate_caa(
+        "example.com",
+        [DNSRecord("CAA", "example.com", '0 issue "letsencrypt.org"', 3600)],
+    )
+    empty = _lookup(
+        a=[DNSRecord("A", "example.com", "93.184.216.34", 300)],
+        txt=[DNSRecord("TXT", "example.com", "v=spf1 -all", 300)],
+    )
+    report = SecurityAnalyzer().analyze(
+        empty,
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(empty.txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        caa=observation,
+    )
+    assert not any(item.code.startswith("caa_") for item in report.findings)
+    assert report.risk.value == 0
+
+
+def test_caa_observation_missing_keeps_existing_weight() -> None:
+    from analyzer.caa import evaluate_caa
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_caa("example.com", ())
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        caa=observation,
+    )
+    missing = next(item for item in report.findings if item.code == "caa_missing")
+    assert missing.severity == "info"
+    assert WEIGHTS["caa_missing"] == 2
+
+
+def test_caa_unreadable_is_info_and_unscored() -> None:
+    from analyzer.caa import evaluate_caa
+    from analyzer.risk import WEIGHTS
+
+    observation = evaluate_caa(
+        "example.com", (), error="DNS query timed out."
+    )
+    report = SecurityAnalyzer().analyze(
+        _clean_lookup(),
+        evaluate_dnssec(dnskey_found=True, ds_found=True, ad_flag=True),
+        inspect_spf(_clean_lookup().txt),
+        evaluate_dmarc("_dmarc.example.com", [
+            DNSRecord("TXT", "_dmarc.example.com", "v=DMARC1; p=reject", 300),
+        ]),
+        caa=observation,
+    )
+    unread = next(item for item in report.findings if item.code == "caa_unreadable")
+    assert unread.severity == "info"
+    assert WEIGHTS["caa_unreadable"] == 0
+    assert not any(item.code == "caa_missing" for item in report.findings)
     assert report.risk.value == 0
 
 

@@ -47,6 +47,7 @@ from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
 from analyzer.cname import CnameTargetObservation
 from analyzer.soa import SoaNsObservation
+from analyzer.caa import CaaObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.models import CoreLookup, DNSRecord
@@ -95,7 +96,7 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 
@@ -110,7 +111,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/CNAME targets/SOA-NS/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/CNAME targets/SOA-NS/CAA summary/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -643,6 +644,7 @@ def _print_lookup(
     ns_hosts: NsHostObservation | None = None,
     cname_targets: CnameTargetObservation | None = None,
     soa_ns: SoaNsObservation | None = None,
+    caa: CaaObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -703,10 +705,11 @@ def _print_lookup(
             or ns_hosts is None
             or cname_targets is None
             or soa_ns is None
+            or caa is None
             or security is None
         ):
             raise RuntimeError(
-                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS results."
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS/CAA results."
             )
         _print_dnssec(dnssec)
         _print_spf(spf)
@@ -721,6 +724,7 @@ def _print_lookup(
         _print_ns_hosts(ns_hosts)
         _print_cname_targets(cname_targets)
         _print_soa_ns(soa_ns)
+        _print_caa(caa)
         _print_security(security)
 
 
@@ -731,6 +735,25 @@ def _print_dnssec(observation: DnssecObservation) -> None:
     print(f"DNSKEY: {'FOUND' if observation.dnskey_found else 'NOT FOUND'}")
     print(f"DS:     {'FOUND' if observation.ds_found else 'NOT FOUND'}")
     print(f"AD flag: {'SET' if observation.ad_flag else 'NOT SET'} (this resolver)")
+    if observation.keys:
+        print("Keys:")
+        for key in observation.keys:
+            tag = f", key tag {key.key_tag}" if key.key_tag is not None else ""
+            print(
+                f"  {key.flags} {key.protocol} {key.algorithm}  "
+                f"({key.role}, {key.algorithm_meaning}{tag})"
+            )
+        if observation.keys_truncated:
+            print("  Note: more than 8 DNSKEY records; extras were not listed.")
+    if observation.delegations:
+        print("Delegations (DS):")
+        for item in observation.delegations:
+            print(
+                f"  {item.key_tag} {item.algorithm} {item.digest_type}  "
+                f"({item.algorithm_meaning}, {item.digest_meaning})"
+            )
+        if observation.delegations_truncated:
+            print("  Note: more than 8 DS records; extras were not listed.")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1020,6 +1043,33 @@ def _print_soa_ns(observation: SoaNsObservation) -> None:
         print(f"NS: {', '.join(observation.ns_hosts)}")
     elif observation.status == "NO NS":
         print("No NS records at this name.")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_caa(observation: CaaObservation) -> None:
+    print("CAA")
+    print("────────────────────────")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No CAA records at this name.")
+    if observation.issue:
+        print(f"issue: {', '.join(observation.issue)}")
+    if observation.issuewild:
+        print(f"issuewild: {', '.join(observation.issuewild)}")
+    if observation.iodef:
+        print(f"iodef: {', '.join(observation.iodef)}")
+    for item in observation.properties:
+        critical = ", issuer critical" if item.issuer_critical else ""
+        print(
+            f'  {item.flags} {item.tag} "{item.value}"  '
+            f"({item.tag_meaning}{critical})"
+        )
+    if observation.truncated:
+        print("  Note: more than 8 CAA records; extras were not listed.")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1427,6 +1477,7 @@ def _run(argv: list[str] | None = None) -> int:
     ns_hosts = None
     cname_targets = None
     soa_ns = None
+    caa = None
     try:
         if view.show_security:
             workers = 8 + len(selectors) + len(srv_specs)
@@ -1443,6 +1494,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_ns_hosts = pool.submit(resolver.inspect_ns_hosts, domain)
                 fut_cname_targets = pool.submit(resolver.inspect_cname_targets, lookup)
                 fut_soa_ns = pool.submit(resolver.inspect_soa_ns, domain)
+                fut_caa = pool.submit(resolver.inspect_caa, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1463,6 +1515,7 @@ def _run(argv: list[str] | None = None) -> int:
                 ns_hosts = fut_ns_hosts.result()
                 cname_targets = fut_cname_targets.result()
                 soa_ns = fut_soa_ns.result()
+                caa = fut_caa.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1486,6 +1539,7 @@ def _run(argv: list[str] | None = None) -> int:
                 ns_hosts,
                 cname_targets,
                 soa_ns,
+                caa,
             )
         elif selectors or srv_specs:
             extra = len(selectors) + len(srv_specs)
@@ -1555,6 +1609,7 @@ def _run(argv: list[str] | None = None) -> int:
         ns_hosts=ns_hosts,
         cname_targets=cname_targets,
         soa_ns=soa_ns,
+        caa=caa,
         dkim=dkim_observations,
         srv=srv_observations,
         security=security,
@@ -1593,6 +1648,7 @@ def _run(argv: list[str] | None = None) -> int:
             ns_hosts,
             cname_targets,
             soa_ns,
+            caa,
         )
         if comparison is not None:
             _print_comparison(comparison)
