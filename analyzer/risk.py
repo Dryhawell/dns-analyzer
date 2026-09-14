@@ -45,6 +45,8 @@ WEIGHTS: dict[str, int] = {
     "dkim_multiple": 5,
     "srv_unreadable": 0,
     "srv_missing": 0,
+    "naptr_unreadable": 0,
+    "naptr_missing": 0,
     "mtasts_unreadable": 0,
     "mtasts_missing": 0,
     "mtasts_multiple": 5,

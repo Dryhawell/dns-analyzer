@@ -77,6 +77,7 @@ from analyzer.dnssec import (
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts, mta_sts_policy_host, mta_sts_query_name
 from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
+from analyzer.naptr import NaptrObservation, evaluate_naptr
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa, tlsa_query_name
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt, tls_rpt_query_name
@@ -696,6 +697,20 @@ class DNSResolver:
 
     def resolve_srv(self, name: str) -> list[DNSRecord]:
         return self._query(name, "SRV")
+
+    def inspect_naptr(self, name: str) -> NaptrObservation:
+        """NAPTR lookup at <name>. Does not apply regexp or follow replacement."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_naptr(host)
+        except DomainNotFoundError:
+            return evaluate_naptr(host, ())
+        except DNSQueryError as exc:
+            return evaluate_naptr(host, (), error=str(exc))
+        return evaluate_naptr(host, records)
+
+    def resolve_naptr(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "NAPTR")
 
     def expand_spf(self, observation: SpfObservation) -> SpfObservation:
         """Look up include:/redirect= one hop. Nested include: is listed, not queried."""

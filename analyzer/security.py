@@ -19,6 +19,7 @@ from analyzer.records import describe_ip_scope
 from analyzer.risk import RiskScore, score_risk
 from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
+from analyzer.naptr import NaptrObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -61,7 +62,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA observations."""
 
     def analyze(
         self,
@@ -82,6 +83,7 @@ class SecurityAnalyzer:
         cname_targets: CnameTargetObservation | None = None,
         soa_ns: SoaNsObservation | None = None,
         caa: CaaObservation | None = None,
+        naptr: NaptrObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -89,6 +91,8 @@ class SecurityAnalyzer:
         findings.extend(self._dmarc(dmarc))
         findings.extend(self._dkim(dkim))
         findings.extend(self._srv(srv))
+        if naptr is not None:
+            findings.extend(self._naptr(naptr))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
@@ -444,6 +448,39 @@ class SecurityAnalyzer:
                     )
                 )
         return findings
+
+    def _naptr(self, observation: NaptrObservation) -> list[SecurityFinding]:
+        if observation.error:
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="NAPTR could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "NAPTR set, and it is not a compromise."
+                    ),
+                    recommendation="Retry the lookup before treating NAPTR as unpublished.",
+                    code="naptr_unreadable",
+                )
+            ]
+        if observation.status == "NOT DETECTED":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="NAPTR not published",
+                    description=(
+                        f"No NAPTR record was found at {observation.query_name}. "
+                        "Most names do not publish NAPTR. This is not proof that "
+                        "ENUM, SIP, or another application is unused."
+                    ),
+                    recommendation=(
+                        "Use --naptr only when you expect rewrite records at this "
+                        "name. This tool does not guess ENUM or SIP applications."
+                    ),
+                    code="naptr_missing",
+                )
+            ]
+        return []
 
     def _mta_sts(self, observation: MtaStsObservation) -> list[SecurityFinding]:
         if observation.error and observation.status != "FOUND":

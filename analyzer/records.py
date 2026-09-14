@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 
 from analyzer.models import DNSRecord
+from analyzer.naptr import flags_meaning
 from analyzer.sshfp import algorithm_meaning, fingerprint_hex, fp_type_meaning
 from analyzer.tlsa import (
     association_hex,
@@ -28,6 +29,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
 
     if rtype == "SRV":
         return _format_srv(rdata)
+
+    if rtype == "NAPTR":
+        return _format_naptr(rdata)
 
     if rtype == "TXT":
         strings = getattr(rdata, "strings", None)
@@ -104,6 +108,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         )
     if rtype == "SRV":
         return _srv_details(rdata)
+    if rtype == "NAPTR":
+        return _naptr_details(rdata)
     if rtype == "CAA":
         tag = getattr(rdata, "tag", "")
         if isinstance(tag, bytes):
@@ -137,6 +143,11 @@ def _mx_priority(record_type: str, rdata: object) -> int | None:
         if priority is None:
             return None
         return int(priority)
+    if rtype == "NAPTR":
+        order = getattr(rdata, "order", None)
+        if order is None:
+            return None
+        return int(order)
     return None
 
 
@@ -183,6 +194,42 @@ def _sshfp_details(rdata: object) -> tuple[tuple[str, str], ...]:
     if truncated:
         rows.append(("Truncated", "yes"))
     return tuple(rows)
+
+
+def _format_naptr(rdata: object) -> str:
+    order = getattr(rdata, "order", "")
+    preference = getattr(rdata, "preference", "")
+    flags = _naptr_string(getattr(rdata, "flags", ""))
+    service = _naptr_string(getattr(rdata, "service", ""))
+    regexp = _naptr_string(getattr(rdata, "regexp", ""))
+    replacement = _text(getattr(rdata, "replacement", "")) or "."
+    return f'{order} {preference} "{flags}" "{service}" "{regexp}" {replacement}'
+
+
+def _naptr_details(rdata: object) -> tuple[tuple[str, str], ...]:
+    flags = _naptr_string(getattr(rdata, "flags", ""))
+    replacement = _text(getattr(rdata, "replacement", "")) or "."
+    return (
+        ("Order", f"{getattr(rdata, 'order', '')} — lower number is tried first"),
+        (
+            "Preference",
+            f"{getattr(rdata, 'preference', '')} — among the same order",
+        ),
+        ("Flags", f"{flags} — {flags_meaning(flags)}" if flags else flags_meaning(flags)),
+        ("Services", _naptr_string(getattr(rdata, "service", ""))),
+        ("Regexp", _naptr_string(getattr(rdata, "regexp", ""))),
+        ("Replacement", replacement),
+        (
+            "Note",
+            "Regexp is not executed; replacement is not followed (RFC 3403 listing only).",
+        ),
+    )
+
+
+def _naptr_string(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _format_srv(rdata: object) -> str:

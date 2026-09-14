@@ -66,6 +66,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["caa"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
+    assert payload["naptr"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -298,6 +299,47 @@ def test_json_and_html_include_srv() -> None:
                         )
                     ],
                 ),
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_naptr() -> None:
+    from analyzer.naptr import evaluate_naptr
+
+    observation = evaluate_naptr(
+        "example.com",
+        [
+            DNSRecord(
+                "NAPTR",
+                "example.com",
+                '100 50 "u" "E2U+sip" "!^.*$!sip:info@example.com!" .',
+                300,
+            )
+        ],
+    )
+    result = _result(naptr=observation)
+    payload = result_to_dict(result)
+    assert payload["naptr"]["status"] == "FOUND"
+    assert payload["naptr"]["rewrites"][0]["services"] == "E2U+sip"
+    assert payload["naptr"]["rewrites"][0]["order"] == 100
+    page = dumps_html(result)
+    assert "E2U+sip" in page
+    assert "sip:info@example.com" in page
+    xss = dumps_html(
+        _result(
+            naptr=evaluate_naptr(
+                "example.com",
+                [
+                    DNSRecord(
+                        "NAPTR",
+                        "example.com",
+                        '10 10 "u" "E2U+sip" "!^.*$!<script>alert(1)</script>!" .',
+                        60,
+                    )
+                ],
             )
         )
     )

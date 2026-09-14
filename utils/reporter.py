@@ -33,6 +33,7 @@ from analyzer.risk import RiskScore
 from analyzer.security import SecurityFinding, SecurityReport
 from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
+from analyzer.naptr import NaptrObservation, NaptrRewrite
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.version import __version__
 
@@ -84,6 +85,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "caa": _caa_dict(result.caa),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
+        "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -506,6 +508,29 @@ def _srv_dict(observation: SrvObservation) -> dict[str, object]:
     }
 
 
+def _naptr_dict(observation: NaptrObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "rewrites": [_naptr_rewrite_dict(item) for item in observation.rewrites],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _naptr_rewrite_dict(item: NaptrRewrite) -> dict[str, object]:
+    return {
+        "order": item.order,
+        "preference": item.preference,
+        "flags": item.flags,
+        "flags_meaning": item.flags_meaning,
+        "services": item.services,
+        "regexp": item.regexp,
+        "replacement": item.replacement,
+    }
+
+
 def _security_dict(report: SecurityReport | None) -> dict[str, object] | None:
     if report is None:
         return None
@@ -627,6 +652,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
     if result.srv:
         for item in result.srv:
             parts.extend(_html_srv(item))
+    if result.naptr is not None:
+        parts.extend(_html_naptr(result.naptr))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -1089,6 +1116,48 @@ def _html_srv(observation: SrvObservation) -> list[str]:
                     f"<tr><td colspan=\"3\">{_e(label)}: {_e(value)}</td></tr>"
                 )
         parts.extend(["</tbody>", "</table>"])
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_naptr(observation: NaptrObservation) -> list[str]:
+    parts = [
+        "<h2>NAPTR</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No NAPTR records at this name.</p>")
+    if observation.rewrites:
+        parts.extend(
+            [
+                "<table>",
+                "<thead><tr><th>Order</th><th>Preference</th><th>Flags</th>"
+                "<th>Services</th><th>Regexp</th><th>Replacement</th></tr></thead>",
+                "<tbody>",
+            ]
+        )
+        for item in observation.rewrites:
+            parts.append(
+                "<tr>"
+                f"<td>{item.order}</td>"
+                f"<td>{item.preference}</td>"
+                f"<td><code>{_e(item.flags)}</code></td>"
+                f"<td><code>{_e(item.services)}</code></td>"
+                f"<td><code>{_e(item.regexp)}</code></td>"
+                f"<td><code>{_e(item.replacement)}</code></td>"
+                "</tr>"
+            )
+            parts.append(
+                f"<tr><td colspan=\"6\">{_e(item.flags_meaning)}</td></tr>"
+            )
+        parts.extend(["</tbody>", "</table>"])
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 NAPTR records; extras were not listed.</p>'
+        )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
     parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")

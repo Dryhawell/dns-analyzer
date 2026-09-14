@@ -174,3 +174,41 @@ def test_srv_dot_target_explains_not_offered() -> None:
     assert format_rdata("SRV", rdata) == "0 0 0 ."
     row = records_from_answer("SRV", "_sip._tcp.example.com", SimpleAnswer(rdata))[0]
     assert "not offered" in dict(row.details)["Note"]
+
+
+def test_naptr_value_lists_fields() -> None:
+    rdata = DummyRdata(
+        "unused",
+        order=100,
+        preference=50,
+        flags="u",
+        service="E2U+sip",
+        regexp="!^.*$!sip:info@example.com!",
+        replacement=".",
+    )
+    assert (
+        format_rdata("NAPTR", rdata)
+        == '100 50 "u" "E2U+sip" "!^.*$!sip:info@example.com!" .'
+    )
+    row = records_from_answer("NAPTR", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    assert row.name == "example.com"
+    assert row.priority == 100
+    details = dict(row.details)
+    assert details["Services"] == "E2U+sip"
+    assert "does not rewrite" in details["Flags"]
+    assert "not executed" in details["Note"]
+
+
+def test_naptr_bytes_fields_and_dot_replacement() -> None:
+    rdata = DummyRdata(
+        "unused",
+        order=10,
+        preference=20,
+        flags=b"s",
+        service=b"SIP+D2T",
+        regexp=b"",
+        replacement="sip.example.com.",
+    )
+    assert format_rdata("NAPTR", rdata) == '10 20 "s" "SIP+D2T" "" sip.example.com'
+    row = records_from_answer("NAPTR", "example.com", SimpleAnswer(rdata))[0]
+    assert dict(row.details)["Replacement"] == "sip.example.com"

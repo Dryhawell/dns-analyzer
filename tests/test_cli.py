@@ -223,6 +223,7 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     )
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
+    mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     output = capsys.readouterr().out
     assert "Target:" in output
     assert "example.com" in output
@@ -838,6 +839,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_caa.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
+    mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A",)
     )
@@ -882,6 +884,7 @@ def test_cli_security_flag_skips_record_dump(mock_resolver_cls, capsys) -> None:
     assert "SECURITY ANALYSIS" in output
     assert "RISK SCORE" in output
     mock_resolver_cls.return_value.inspect_dnssec.assert_called_once()
+    mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A", "AAAA", "CNAME", "TXT", "CAA")
     )
@@ -969,6 +972,18 @@ def test_cli_rejects_reverse_with_dkim(capsys) -> None:
 
 def test_cli_rejects_reverse_with_srv(capsys) -> None:
     assert run(["--reverse", "8.8.8.8", "--srv", "sip"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
+def test_cli_record_naptr_hints_naptr_flag(capsys) -> None:
+    assert run(["example.com", "--record", "NAPTR"]) == 1
+    err = capsys.readouterr().err
+    assert "--naptr" in err
+    assert "opt-in" in err.lower() or "ENUM" in err
+
+
+def test_cli_rejects_reverse_with_naptr(capsys) -> None:
+    assert run(["--reverse", "8.8.8.8", "--naptr"]) == 1
     assert "--reverse" in capsys.readouterr().err
 
 
@@ -1101,12 +1116,70 @@ def test_cli_rejects_invalid_srv_service(capsys) -> None:
     assert "Invalid SRV service" in capsys.readouterr().err
 
 
+@patch("cli.interface.DNSResolver")
+def test_cli_naptr_prints_section(mock_resolver_cls, capsys) -> None:
+    from analyzer.naptr import evaluate_naptr
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_naptr.return_value = evaluate_naptr(
+        "example.com",
+        [
+            DNSRecord(
+                "NAPTR",
+                "example.com",
+                '100 50 "u" "E2U+sip" "!^.*$!sip:info@example.com!" .',
+                300,
+            )
+        ],
+    )
+
+    assert run(["example.com", "--record", "A", "--naptr"]) == 0
+    output = capsys.readouterr().out
+    assert "NAPTR" in output
+    assert "FOUND" in output
+    assert "E2U+sip" in output
+    assert "SECURITY ANALYSIS" not in output
+    mock_resolver_cls.return_value.inspect_naptr.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_naptr_json_includes_observation(mock_resolver_cls, capsys) -> None:
+    from analyzer.naptr import evaluate_naptr
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_naptr.return_value = evaluate_naptr(
+        "example.com",
+        [
+            DNSRecord(
+                "NAPTR",
+                "example.com",
+                '10 10 "s" "SIP+D2T" "" _sip._tcp.example.com.',
+                60,
+            )
+        ],
+    )
+
+    assert run(["example.com", "--naptr", "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["naptr"]["status"] == "FOUND"
+    assert data["naptr"]["rewrites"][0]["flags"] == "s"
+    assert data["naptr"]["rewrites"][0]["replacement"] == "_sip._tcp.example.com"
+
+
 def test_cli_help_lists_modes() -> None:
     help_text = build_parser().format_help()
     assert "--record" in help_text
     assert "--security" in help_text
     assert "--dkim" in help_text
     assert "--srv" in help_text
+    assert "--naptr" in help_text
     assert "--all" in help_text
     assert "--reverse" in help_text
     assert "--format" in help_text
@@ -1150,6 +1223,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["security_analysis"]["findings"]
     assert data["dkim"] is None
     assert data["srv"] is None
+    assert data["naptr"] is None
     assert data["mta_sts"]["query_name"] == "_mta-sts.example.com"
     assert data["tls_rpt"]["query_name"] == "_smtp._tls.example.com"
     assert data["bimi"]["query_name"] == "default._bimi.example.com"

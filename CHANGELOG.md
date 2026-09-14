@@ -2,6 +2,23 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.18.0 — 2026-09-14
+
+NAPTR rewrite listing. The regexp is not executed and ENUM/SIP names are not guessed.
+
+### Added
+
+- Opt-in `--naptr` lists up to 8 NAPTR records (order, preference, flags, services, regexp, replacement)
+- CLI/JSON/HTML include `naptr` only when `--naptr` is used
+- Findings: `naptr_missing` / `naptr_unreadable` are info (+0)
+- `--record NAPTR` is rejected with a hint to use `--naptr`
+
+### Notes
+
+- Default / `--security` / `--all` do not query NAPTR unless `--naptr` is passed
+- Listing a regexp or `E2U+sip` is not a SIP scan and is not a rewrite
+- This tool does not follow flag S/A replacement lookups
+
 ## 1.17.0 — 2026-09-14
 
 CAA issue / issuewild / iodef listing. Certificate authorities are not contacted.
