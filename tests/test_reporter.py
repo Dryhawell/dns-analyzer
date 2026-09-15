@@ -66,6 +66,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["caa"] is None
     assert payload["cds"] is None
     assert payload["nsec"] is None
+    assert payload["csync"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["naptr"] is None
@@ -485,6 +486,51 @@ def test_json_and_html_include_nsec() -> None:
     assert "&lt;script&gt;" in page
     assert "NSEC3PARAM" in page
     assert "salt length 4" in page
+
+
+def test_json_and_html_include_csync() -> None:
+    from analyzer.csync import CsyncRecord, evaluate_csync
+
+    observation = evaluate_csync(
+        "example.com",
+        found=True,
+        csync=(
+            CsyncRecord(
+                serial=2026091501,
+                flags=1,
+                immediate=True,
+                soa_minimum=False,
+                types=("NS", "A"),
+            ),
+        ),
+    )
+    result = _result(csync=observation)
+    payload = result_to_dict(result)
+    assert payload["csync"]["status"] == "FOUND"
+    assert payload["csync"]["csync"][0]["serial"] == 2026091501
+    assert payload["csync"]["csync"][0]["types"] == ["NS", "A"]
+    page = dumps_html(result)
+    assert "2026091501" in page
+    assert "immediate" in page
+    xss = dumps_html(
+        _result(
+            csync=evaluate_csync(
+                "example.com",
+                found=True,
+                csync=(
+                    CsyncRecord(
+                        serial=1,
+                        flags=0,
+                        immediate=False,
+                        soa_minimum=False,
+                        types=("<script>x</script>",),
+                    ),
+                ),
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
 
 
 def test_json_and_html_include_mta_sts() -> None:

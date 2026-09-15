@@ -28,6 +28,7 @@ from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation
 from analyzer.cds import CdsObservation
 from analyzer.nsec import NsecObservation
+from analyzer.csync import CsyncObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -59,6 +60,7 @@ class DNSAnalysisResult:
     caa: CaaObservation | None = None
     cds: CdsObservation | None = None
     nsec: NsecObservation | None = None
+    csync: CsyncObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     naptr: NaptrObservation | None = None

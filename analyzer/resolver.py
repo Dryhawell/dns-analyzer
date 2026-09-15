@@ -72,6 +72,7 @@ from analyzer.nsec import (
     parse_nsec,
     parse_nsec3param,
 )
+from analyzer.csync import CsyncObservation, evaluate_csync, parse_csync
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import (
@@ -815,6 +816,23 @@ class DNSResolver:
             nsec3param=params,
             nsec_truncated=nsec_truncated,
             nsec3param_truncated=params_truncated,
+            error="; ".join(errors) if errors else None,
+        )
+
+    def inspect_csync(self, name: str) -> CsyncObservation:
+        """Look for CSYNC. Does not contact the parent or update delegation."""
+        host = name.rstrip(".").lower()
+        client = self._edns_client()
+        errors: list[str] = []
+        found, _, rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "CSYNC", errors)
+        )
+        records, truncated = parse_csync(rdatas)
+        return evaluate_csync(
+            host,
+            found=found,
+            csync=records,
+            truncated=truncated,
             error="; ".join(errors) if errors else None,
         )
 

@@ -22,6 +22,7 @@ from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation, CaaProperty
 from analyzer.cds import CdnskeyRecord, CdsObservation, CdsRecord
 from analyzer.nsec import Nsec3ParamRecord, NsecObservation, NsecRecord
+from analyzer.csync import CsyncObservation, CsyncRecord
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -88,6 +89,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "caa": _caa_dict(result.caa),
         "cds": _cds_dict(result.cds),
         "nsec": _nsec_dict(result.nsec),
+        "csync": _csync_dict(result.csync),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
@@ -563,6 +565,30 @@ def _nsec3param_dict(item: Nsec3ParamRecord) -> dict[str, object]:
     }
 
 
+def _csync_dict(observation: CsyncObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "csync": [_csync_record_dict(item) for item in observation.csync],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _csync_record_dict(item: CsyncRecord) -> dict[str, object]:
+    return {
+        "serial": item.serial,
+        "flags": item.flags,
+        "immediate": item.immediate,
+        "soa_minimum": item.soa_minimum,
+        "types": list(item.types),
+        "types_truncated": item.types_truncated,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -728,6 +754,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_cds(result.cds))
     if result.nsec is not None:
         parts.extend(_html_nsec(result.nsec))
+    if result.csync is not None:
+        parts.extend(_html_csync(result.csync))
     if result.spf is not None:
         parts.extend(_html_spf(result.spf))
     if result.dmarc is not None:
@@ -971,6 +999,43 @@ def _html_nsec(observation: NsecObservation) -> list[str]:
         if observation.nsec_truncated:
             parts.append(
                 '<p class="note">more than 8 NSEC records; extras were not listed.</p>'
+            )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_csync(observation: CsyncObservation) -> list[str]:
+    parts = [
+        "<h2>CSYNC</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No CSYNC records at this name.</p>")
+    if observation.csync:
+        parts.append("<p>CSYNC:</p>")
+        parts.append("<ul>")
+        for item in observation.csync:
+            flags = []
+            if item.immediate:
+                flags.append("immediate")
+            if item.soa_minimum:
+                flags.append("soaminimum")
+            flag_text = ", ".join(flags) if flags else "no flags"
+            types = " ".join(item.types) if item.types else "(types not listed)"
+            extra = " …" if item.types_truncated else ""
+            parts.append(
+                "<li>"
+                f"serial {item.serial} flags {item.flags} ({_e(flag_text)})"
+                f" types {_e(types)}{_e(extra)}"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.truncated:
+            parts.append(
+                '<p class="note">more than 8 CSYNC records; extras were not listed.</p>'
             )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

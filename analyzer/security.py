@@ -29,6 +29,7 @@ from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation
 from analyzer.cds import CdsObservation
 from analyzer.nsec import NsecObservation
+from analyzer.csync import CsyncObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -65,7 +66,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC observations."""
 
     def analyze(
         self,
@@ -90,6 +91,7 @@ class SecurityAnalyzer:
         uri: UriObservation | None = None,
         cds: CdsObservation | None = None,
         nsec: NsecObservation | None = None,
+        csync: CsyncObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -105,6 +107,8 @@ class SecurityAnalyzer:
             findings.extend(self._cds(cds))
         if nsec is not None:
             findings.extend(self._nsec(nsec))
+        if csync is not None:
+            findings.extend(self._csync(csync))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
@@ -597,6 +601,43 @@ class SecurityAnalyzer:
                         "This tool does not walk the NSEC/NSEC3 chain or query NSEC3."
                     ),
                     code="nsec_missing",
+                )
+            ]
+        return []
+
+    def _csync(self, observation: CsyncObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CSYNC could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "CSYNC set, and it is not broken DNS or a compromise."
+                    ),
+                    recommendation=(
+                        "Retry the CSYNC lookup before treating child-to-parent "
+                        "NS signaling as unpublished."
+                    ),
+                    code="csync_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CSYNC not published",
+                    description=(
+                        f"No CSYNC record at {observation.query_name}. "
+                        "Absence is common. This is not broken DNS and is not "
+                        "a compromise."
+                    ),
+                    recommendation=(
+                        "CSYNC is optional child-to-parent NS/A/AAAA signaling "
+                        "(RFC 7477). This tool does not contact the parent "
+                        "registry or update parent delegation."
+                    ),
+                    code="csync_missing",
                 )
             ]
         return []

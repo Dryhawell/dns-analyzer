@@ -2,6 +2,24 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.22.0 — 2026-09-15
+
+CSYNC listing. Child-to-parent NS/A/AAAA signaling is listed, not applied.
+
+### Added
+
+- Default / `--security` / `--all` list up to 8 CSYNC records (serial, flags, immediate, soaminimum, type bitmap)
+- CLI/JSON/HTML include `csync`
+- Findings: `csync_missing` / `csync_unreadable` are info (+0)
+- `--record CSYNC` is rejected with a hint to use default / `--security`
+
+### Notes
+
+- Missing CSYNC is common and is not broken DNS
+- This tool does not contact the parent registry or update parent delegation
+- CSYNC is not compared to the child NS set
+- The serial is a change counter for the parent, not a security score
+
 ## 1.21.0 — 2026-09-15
 
 NSEC / NSEC3PARAM listing. Authenticated denial is listed at this name; the chain is not walked.
