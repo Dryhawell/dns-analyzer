@@ -2,9 +2,9 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.20.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.21.0** — see [CHANGELOG.md](CHANGELOG.md).
 
-This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV, NAPTR, URI, CDS) are observations, not automatic proof of compromise.
+This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV, NAPTR, URI, CDS, NSEC) are observations, not automatic proof of compromise.
 
 ---
 
@@ -14,7 +14,7 @@ DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 
 1. Validates and normalizes the input
 2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB, PTR)
-3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CDS/CDNSKEY, optional DKIM / SRV / NAPTR / URI)
+3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CDS/CDNSKEY, NSEC/NSEC3PARAM, optional DKIM / SRV / NAPTR / URI)
 4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
 Three layers:
@@ -53,6 +53,7 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - TTL display (cache lifetime, never a security score)
 - DNSSEC **detection** (DNSKEY / DS / AD flag) plus DNSKEY/DS algorithm labels, not a full chain-of-trust validator
 - CDS / CDNSKEY listing (RFC 7344); the parent registry is not contacted
+- NSEC / NSEC3PARAM listing (RFC 4034 / 5155); the NSEC/NSEC3 chain is not walked
 - SPF and DMARC parsing from TXT; `include:` followed one hop; DKIM and SRV are opt-in
 - MTA-STS TXT at `_mta-sts` (RFC 8461); the HTTPS policy file is not fetched
 - TLS-RPT TXT at `_smtp._tls` (RFC 8460); SMTP is not probed
@@ -116,6 +117,8 @@ It does **not** assign CVEs, does **not** prove a domain is compromised, and doe
 | **URI** | Published URI — priority, weight, target (RFC 7553) | Opt-in via `--uri`; the target is not fetched. Missing is not a compromise |
 | **CDS** | Child DS candidate — algorithm, digest type (RFC 7344) | Listed with default / `--security`. Missing is common, not broken DNSSEC |
 | **CDNSKEY** | Child DNSKEY candidate for parent DS (RFC 7344) | Listed with default / `--security`. The parent is not contacted |
+| **NSEC** | Next owner name + types at this name (RFC 4034) | Listed with default / `--security`. The next name is not queried |
+| **NSEC3PARAM** | NSEC3 hash parameters at the apex (RFC 5155) | Listed with default / `--security`. Hashed names are not synthesized |
 | **PTR** | IP → hostname (reverse DNS, under in-addr.arpa / ip6.arpa) | The address has no published reverse name |
 
 TTL is shown next to each record as a **cache lifetime**, never as a security score. MX and SRV **priority**: lower number is tried first.
@@ -184,9 +187,9 @@ python main.py --version
 
 | Mode | What you get |
 | --- | --- |
-| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, findings, risk score |
+| (default) or `--all` | Every core record type, TTL summary, DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, NSEC/NSEC3PARAM, findings, risk score |
 | `--record TYPE` | Only that type (repeatable). Skips security queries. Other types are not queried; **A is still queried first** so NXDOMAIN can abort |
-| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / SSHFP / FCrDNS / MX hosts / NS hosts / CNAME targets / SOA/NS / CAA summary / CDS/CDNSKEY / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB dump; MX, NS, and SOA are still queried for host/primary checks) |
+| `--security` | DNSSEC / SPF / DMARC / MTA-STS / TLS-RPT / BIMI / DANE TLSA / SSHFP / FCrDNS / MX hosts / NS hosts / CNAME targets / SOA/NS / CAA summary / CDS/CDNSKEY / NSEC/NSEC3PARAM / findings / score, without the record dump. Queries A, AAAA, CNAME, TXT, CAA (not MX/NS/SOA/HTTPS/SVCB dump; MX, NS, and SOA are still queried for host/primary checks) |
 | `--dkim SELECTOR` | TXT at `SELECTOR._domainkey.<domain>`. Repeatable (max 8). Never guessed |
 | `--srv SERVICE` | SRV at `_SERVICE._tcp.<domain>` (or `SERVICE/udp`). Repeatable (max 8). Never guessed |
 | `--naptr` | NAPTR at this domain. The regexp is not executed; ENUM/SIP names are never guessed |
@@ -198,7 +201,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.20.0` and exit |
+| `--version` | Print `dns-analyzer 1.21.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -322,7 +325,7 @@ JSON and CSV are for other programs, not for humans scraping the terminal. HTML 
 
 HTML uses inline CSS only: no JavaScript, no CDN. Record values are escaped (`&lt;script&gt;`) so a TXT string cannot inject markup.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `cds` (CDS/CDNSKEY when security view is on), `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi`, `tlsa`, `sshfp`, `fcrdns`, `mx_hosts`, `ns_hosts`, `cname_targets` and `soa_ns` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `naptr` (only when `--naptr` is used), `uri` (only when `--uri` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
+JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `cds` (CDS/CDNSKEY when security view is on), `nsec` (NSEC/NSEC3PARAM when security view is on), `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi`, `tlsa`, `sshfp`, `fcrdns`, `mx_hosts`, `ns_hosts`, `cname_targets` and `soa_ns` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `naptr` (only when `--naptr` is used), `uri` (only when `--uri` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, including extra resolvers when comparison is on, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
@@ -387,10 +390,13 @@ This tool reports:
 - **DS** — the parent zone has a hash of those keys (algorithm + digest type; digest bytes are not dumped)
 - **AD flag** — whether *your* recursive resolver marked the answer as authenticated
 - **CDS / CDNSKEY** — child-to-parent DS signaling (RFC 7344). Listed when DNSSEC is inspected. The parent registry is not contacted.
+- **NSEC / NSEC3PARAM** — authenticated denial at this name (RFC 4034 / 5155). Listed when DNSSEC is inspected. The chain is not walked.
 
 `DETECTED` means those signals were visible **to this resolver**. It is **not** a full validation against the IANA root key. Algorithm names are labels from this answer, not proof that the chain is valid. `NOT DETECTED` does not mean the domain is compromised — many ISP resolvers hide DNSSEC records or never set AD. A SHA-1-era algorithm (5 / 7) is listed as info, not a breach.
 
 CDS/CDNSKEY `FOUND` means this resolver saw those records at the scanned name. Missing CDS is **common** even on signed zones and is **not** broken DNSSEC. Listing CDS is not a DS match check and not a parent update.
+
+NSEC/NSEC3PARAM `FOUND` means this resolver saw those records at the scanned name. Missing NSEC is **common** on unsigned zones. A listed next name is **not** followed; this tool does not enumerate the zone.
 
 ---
 
@@ -522,7 +528,7 @@ dns-analyzer/
 │   ├── models.py                # DNSRecord, CoreLookup
 │   ├── reverse.py               # IP → PTR name
 │   ├── ttl.py                   # cache-lifetime wording
-│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / naptr.py / uri.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py / sshfp.py / fcrdns.py / mx.py / ns.py / cname.py / soa.py / caa.py / cds.py
+│   ├── dnssec.py / spf.py / dmarc.py / dkim.py / srv.py / naptr.py / uri.py / mtasts.py / tlsrpt.py / bimi.py / tlsa.py / sshfp.py / fcrdns.py / mx.py / ns.py / cname.py / soa.py / caa.py / cds.py / nsec.py
 │   ├── security.py / risk.py
 │   ├── config.py / compare.py   # named resolvers, A/AAAA diff
 │   └── result.py                # one run, ready to export
@@ -544,7 +550,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, NAPTR, URI, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA formatting and issue/issuewild/iodef listing, DNSSEC evaluation and DNSKEY/DS algorithm listing, CDS/CDNSKEY listing, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, NAPTR, URI, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA formatting and issue/issuewild/iodef listing, DNSSEC evaluation and DNSKEY/DS algorithm listing, CDS/CDNSKEY listing, NSEC/NSEC3PARAM listing, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -557,6 +563,7 @@ If a test needs the network, it does not belong in this suite.
 - Missing HTTPS/SVCB is common and is not scored
 - DNSSEC here is **visibility to this resolver**, not validation to the IANA root; algorithm listing is not a crypto audit
 - CDS/CDNSKEY listing is DNS-only; CDS is not compared to DS/DNSKEY; the parent registry is not contacted; missing CDS is not broken DNSSEC
+- NSEC/NSEC3PARAM listing is DNS-only at this name; the NSEC/NSEC3 chain is not walked; NSEC3 hashed names are not synthesized; missing NSEC is not broken DNSSEC
 - SPF `include:` / `redirect=` are followed one hop; nested include: and a/mx/ptr/exists are not evaluated
 - DKIM selectors are **opt-in** (`--dkim`); they are never brute-forced or guessed
 - SRV services are **opt-in** (`--srv`); they are never brute-forced or guessed
@@ -589,7 +596,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.20.0** lists CDS and CDNSKEY when DNSSEC is inspected. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.21.0** lists NSEC and NSEC3PARAM when DNSSEC is inspected. The chain is not walked. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 

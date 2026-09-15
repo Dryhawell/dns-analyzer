@@ -65,6 +65,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["soa_ns"] is None
     assert payload["caa"] is None
     assert payload["cds"] is None
+    assert payload["nsec"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["naptr"] is None
@@ -447,6 +448,43 @@ def test_json_and_html_include_cds() -> None:
     )
     assert "<script>x</script>" not in xss
     assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_nsec() -> None:
+    from analyzer.nsec import Nsec3ParamRecord, NsecRecord, evaluate_nsec
+
+    observation = evaluate_nsec(
+        "example.com",
+        nsec_found=True,
+        nsec3param_found=True,
+        nsec=(
+            NsecRecord(
+                next_name="www.<script>alert(1)</script>.example.com",
+                types=("A", "NS", "SOA"),
+            ),
+        ),
+        nsec3param=(
+            Nsec3ParamRecord(
+                algorithm=1,
+                algorithm_meaning="SHA-1 (NSEC3 hash)",
+                flags=0,
+                opt_out=False,
+                iterations=0,
+                salt_length=4,
+                iterations_note="0 iterations (RFC 9276)",
+            ),
+        ),
+    )
+    result = _result(nsec=observation)
+    payload = result_to_dict(result)
+    assert payload["nsec"]["status"] == "FOUND"
+    assert payload["nsec"]["nsec"][0]["next_name"] == "www.<script>alert(1)</script>.example.com"
+    assert payload["nsec"]["nsec3param"][0]["salt_length"] == 4
+    page = dumps_html(result)
+    assert "<script>alert(1)</script>" not in page
+    assert "&lt;script&gt;" in page
+    assert "NSEC3PARAM" in page
+    assert "salt length 4" in page
 
 
 def test_json_and_html_include_mta_sts() -> None:

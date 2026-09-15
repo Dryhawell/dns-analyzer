@@ -2,6 +2,24 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.21.0 — 2026-09-15
+
+NSEC / NSEC3PARAM listing. Authenticated denial is listed at this name; the chain is not walked.
+
+### Added
+
+- Default / `--security` / `--all` list up to 8 NSEC3PARAM records (hash algorithm, flags, opt-out, iterations, salt length) and 8 NSEC records (next name, type bitmap)
+- CLI/JSON/HTML include `nsec` with `nsec` and `nsec3param` arrays
+- Findings: `nsec_missing` / `nsec_unreadable` are info (+0)
+- `--record NSEC`, `--record NSEC3`, and `--record NSEC3PARAM` are rejected with a hint to use default / `--security`
+
+### Notes
+
+- Missing NSEC/NSEC3PARAM is common on unsigned zones and is not broken DNSSEC
+- This tool does not walk NSEC/NSEC3 (zone enumeration) and does not query NSEC3
+- Salt bytes are not dumped; only salt length is listed
+- A listed next name is an observation at this query name, not a follow-up lookup
+
 ## 1.20.0 — 2026-09-14
 
 CDS and CDNSKEY listing. Child-to-parent DS signaling is listed, not submitted.

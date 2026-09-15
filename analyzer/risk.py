@@ -51,6 +51,8 @@ WEIGHTS: dict[str, int] = {
     "uri_missing": 0,
     "cds_unreadable": 0,
     "cds_missing": 0,
+    "nsec_unreadable": 0,
+    "nsec_missing": 0,
     "mtasts_unreadable": 0,
     "mtasts_missing": 0,
     "mtasts_multiple": 5,

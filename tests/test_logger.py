@@ -20,6 +20,7 @@ def _bind_lookup(mock_cls) -> None:
     from analyzer.soa import evaluate_soa_ns
     from analyzer.caa import evaluate_caa
     from analyzer.cds import evaluate_cds
+    from analyzer.nsec import evaluate_nsec
     from analyzer.sshfp import evaluate_sshfp
     from analyzer.tlsa import evaluate_tlsa
     from analyzer.mtasts import evaluate_mta_sts
@@ -70,6 +71,9 @@ def _bind_lookup(mock_cls) -> None:
     mock_cls.return_value.inspect_caa.return_value = evaluate_caa("example.com", ())
     mock_cls.return_value.inspect_cds.return_value = evaluate_cds(
         "example.com", cds_found=False, cdnskey_found=False
+    )
+    mock_cls.return_value.inspect_nsec.return_value = evaluate_nsec(
+        "example.com", nsec_found=False, nsec3param_found=False
     )
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 

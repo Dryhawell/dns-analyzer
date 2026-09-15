@@ -21,6 +21,7 @@ from analyzer.cname import CnameTargetCheck, CnameTargetObservation
 from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation, CaaProperty
 from analyzer.cds import CdnskeyRecord, CdsObservation, CdsRecord
+from analyzer.nsec import Nsec3ParamRecord, NsecObservation, NsecRecord
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -86,6 +87,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "soa_ns": _soa_ns_dict(result.soa_ns),
         "caa": _caa_dict(result.caa),
         "cds": _cds_dict(result.cds),
+        "nsec": _nsec_dict(result.nsec),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
@@ -524,6 +526,43 @@ def _cdnskey_record_dict(item: CdnskeyRecord) -> dict[str, object]:
     }
 
 
+def _nsec_dict(observation: NsecObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "nsec_found": observation.nsec_found,
+        "nsec3param_found": observation.nsec3param_found,
+        "nsec": [_nsec_record_dict(item) for item in observation.nsec],
+        "nsec3param": [_nsec3param_dict(item) for item in observation.nsec3param],
+        "nsec_truncated": observation.nsec_truncated,
+        "nsec3param_truncated": observation.nsec3param_truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _nsec_record_dict(item: NsecRecord) -> dict[str, object]:
+    return {
+        "next_name": item.next_name,
+        "types": list(item.types),
+        "types_truncated": item.types_truncated,
+    }
+
+
+def _nsec3param_dict(item: Nsec3ParamRecord) -> dict[str, object]:
+    return {
+        "algorithm": item.algorithm,
+        "algorithm_meaning": item.algorithm_meaning,
+        "flags": item.flags,
+        "opt_out": item.opt_out,
+        "iterations": item.iterations,
+        "salt_length": item.salt_length,
+        "iterations_note": item.iterations_note,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -687,6 +726,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_dnssec(result.dnssec))
     if result.cds is not None:
         parts.extend(_html_cds(result.cds))
+    if result.nsec is not None:
+        parts.extend(_html_nsec(result.nsec))
     if result.spf is not None:
         parts.extend(_html_spf(result.spf))
     if result.dmarc is not None:
@@ -879,6 +920,57 @@ def _html_cds(observation: CdsObservation) -> list[str]:
         if observation.cdnskey_truncated:
             parts.append(
                 '<p class="note">more than 8 CDNSKEY records; extras were not listed.</p>'
+            )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_nsec(observation: NsecObservation) -> list[str]:
+    parts = [
+        "<h2>NSEC / NSEC3PARAM</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+        "<ul>",
+        f"<li>NSEC3PARAM: {'found' if observation.nsec3param_found else 'not found'}</li>",
+        f"<li>NSEC: {'found' if observation.nsec_found else 'not found'}</li>",
+        "</ul>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No NSEC or NSEC3PARAM records at this name.</p>")
+    if observation.nsec3param:
+        parts.append("<p>NSEC3PARAM:</p>")
+        parts.append("<ul>")
+        for item in observation.nsec3param:
+            opt = ", opt-out" if item.opt_out else ""
+            parts.append(
+                "<li>"
+                f"{item.algorithm} {item.flags} {item.iterations} "
+                f"({_e(item.algorithm_meaning)}, salt length {item.salt_length}{_e(opt)})"
+                f" — {_e(item.iterations_note)}"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.nsec3param_truncated:
+            parts.append(
+                '<p class="note">more than 8 NSEC3PARAM records; extras were not listed.</p>'
+            )
+    if observation.nsec:
+        parts.append("<p>NSEC (this name only; next name is not queried):</p>")
+        parts.append("<ul>")
+        for item in observation.nsec:
+            types = " ".join(item.types) if item.types else "(types not listed)"
+            extra = " …" if item.types_truncated else ""
+            parts.append(
+                "<li>"
+                f"next <code>{_e(item.next_name)}</code> {_e(types)}{_e(extra)}"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.nsec_truncated:
+            parts.append(
+                '<p class="note">more than 8 NSEC records; extras were not listed.</p>'
             )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

@@ -49,6 +49,7 @@ from analyzer.cname import CnameTargetObservation
 from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation
 from analyzer.cds import CdsObservation
+from analyzer.nsec import NsecObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.models import CoreLookup, DNSRecord
@@ -101,7 +102,7 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, NSEC/NSEC3PARAM, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 --naptr is opt-in; ENUM/SIP applications are never guessed.
@@ -109,7 +110,7 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
 MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, or URI is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS are also observations, not hijacking.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC are also observations, not hijacking.
 """
 
 
@@ -181,13 +182,14 @@ def build_parser() -> argparse.ArgumentParser:
             "URI is --uri, not --record URI. "
             "TLSA is DANE at _443._tcp, not --record TLSA. "
             "SSHFP is in the security view, not --record SSHFP. "
-            "CDS/CDNSKEY are in the security view, not --record CDS."
+            "CDS/CDNSKEY are in the security view, not --record CDS. "
+            "NSEC/NSEC3PARAM are in the security view, not --record NSEC."
         ),
     )
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, NSEC/NSEC3PARAM, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -287,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "URI", "TLSA", "SSHFP", "CDS", "CDNSKEY"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -329,6 +331,12 @@ def _record_type_error(raw: str) -> str:
         return (
             "CDNSKEY is listed with default / --security (RFC 7344 child-to-parent "
             "DS signaling). It is not a --record dump type."
+        )
+    if kind in {"NSEC", "NSEC3", "NSEC3PARAM"}:
+        return (
+            "NSEC/NSEC3PARAM are listed with default / --security (authenticated "
+            "denial at this name). This tool does not walk the NSEC/NSEC3 chain. "
+            "It is not a --record dump type."
         )
     allowed = ", ".join(_RECORD_ORDER)
     return f"Unknown record type {raw!r}. Use one of: {allowed}."
@@ -700,6 +708,7 @@ def _print_lookup(
     soa_ns: SoaNsObservation | None = None,
     caa: CaaObservation | None = None,
     cds: CdsObservation | None = None,
+    nsec: NsecObservation | None = None,
     naptr: NaptrObservation | None = None,
     uri: UriObservation | None = None,
 ) -> None:
@@ -768,13 +777,15 @@ def _print_lookup(
             or soa_ns is None
             or caa is None
             or cds is None
+            or nsec is None
             or security is None
         ):
             raise RuntimeError(
-                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS/CAA/CDS results."
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS/CAA/CDS/NSEC results."
             )
         _print_dnssec(dnssec)
         _print_cds(cds)
+        _print_nsec(nsec)
         _print_spf(spf)
         _print_dmarc(dmarc)
         _print_mta_sts(mta_sts)
@@ -852,6 +863,41 @@ def _print_cds(observation: CdsObservation) -> None:
             )
         if observation.cdnskey_truncated:
             print("  Note: more than 8 CDNSKEY records; extras were not listed.")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_nsec(observation: NsecObservation) -> None:
+    print("NSEC / NSEC3PARAM")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    print(f"NSEC3PARAM: {'FOUND' if observation.nsec3param_found else 'NOT FOUND'}")
+    print(f"NSEC:       {'FOUND' if observation.nsec_found else 'NOT FOUND'}")
+    if observation.status == "NOT DETECTED":
+        print("No NSEC or NSEC3PARAM records at this name.")
+    if observation.nsec3param:
+        print("NSEC3PARAM:")
+        for item in observation.nsec3param:
+            opt = ", opt-out" if item.opt_out else ""
+            print(
+                f"  {item.algorithm} {item.flags} {item.iterations}  "
+                f"({item.algorithm_meaning}, salt length {item.salt_length}{opt})"
+            )
+            print(f"  {item.iterations_note}")
+        if observation.nsec3param_truncated:
+            print("  Note: more than 8 NSEC3PARAM records; extras were not listed.")
+    if observation.nsec:
+        print("NSEC (this name only; next name is not queried):")
+        for item in observation.nsec:
+            types = " ".join(item.types) if item.types else "(types not listed)"
+            extra = " …" if item.types_truncated else ""
+            print(f"  next {item.next_name}  {types}{extra}")
+        if observation.nsec_truncated:
+            print("  Note: more than 8 NSEC records; extras were not listed.")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1637,6 +1683,7 @@ def _run(argv: list[str] | None = None) -> int:
     soa_ns = None
     caa = None
     cds = None
+    nsec = None
     naptr_observation = None
     uri_observation = None
     try:
@@ -1658,6 +1705,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_soa_ns = pool.submit(resolver.inspect_soa_ns, domain)
                 fut_caa = pool.submit(resolver.inspect_caa, domain)
                 fut_cds = pool.submit(resolver.inspect_cds, domain)
+                fut_nsec = pool.submit(resolver.inspect_nsec, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1686,6 +1734,7 @@ def _run(argv: list[str] | None = None) -> int:
                 soa_ns = fut_soa_ns.result()
                 caa = fut_caa.result()
                 cds = fut_cds.result()
+                nsec = fut_nsec.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1717,6 +1766,7 @@ def _run(argv: list[str] | None = None) -> int:
                 naptr=naptr_observation,
                 uri=uri_observation,
                 cds=cds,
+                nsec=nsec,
             )
         elif selectors or srv_specs or args.naptr or args.uri:
             extra = len(selectors) + len(srv_specs) + extra_optin
@@ -1802,6 +1852,7 @@ def _run(argv: list[str] | None = None) -> int:
         soa_ns=soa_ns,
         caa=caa,
         cds=cds,
+        nsec=nsec,
         dkim=dkim_observations,
         srv=srv_observations,
         naptr=naptr_observation,
@@ -1844,6 +1895,7 @@ def _run(argv: list[str] | None = None) -> int:
             soa_ns,
             caa,
             cds,
+            nsec,
             naptr_observation,
             uri_observation,
         )

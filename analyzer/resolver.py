@@ -66,6 +66,12 @@ from analyzer.soa import (
 )
 from analyzer.caa import CaaObservation, evaluate_caa
 from analyzer.cds import CdsObservation, evaluate_cds, parse_cds, parse_cdnskey
+from analyzer.nsec import (
+    NsecObservation,
+    evaluate_nsec,
+    parse_nsec,
+    parse_nsec3param,
+)
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import (
@@ -785,6 +791,30 @@ class DNSResolver:
             cdnskey=keys,
             cds_truncated=cds_truncated,
             cdnskey_truncated=keys_truncated,
+            error="; ".join(errors) if errors else None,
+        )
+
+    def inspect_nsec(self, name: str) -> NsecObservation:
+        """Look for NSEC3PARAM/NSEC at this name. Does not walk the chain."""
+        host = name.rstrip(".").lower()
+        client = self._edns_client()
+        errors: list[str] = []
+        nsec3param_found, _, nsec3param_rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "NSEC3PARAM", errors)
+        )
+        nsec_found, _, nsec_rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "NSEC", errors)
+        )
+        params, params_truncated = parse_nsec3param(nsec3param_rdatas)
+        nsec, nsec_truncated = parse_nsec(nsec_rdatas)
+        return evaluate_nsec(
+            host,
+            nsec_found=nsec_found,
+            nsec3param_found=nsec3param_found,
+            nsec=nsec,
+            nsec3param=params,
+            nsec_truncated=nsec_truncated,
+            nsec3param_truncated=params_truncated,
             error="; ".join(errors) if errors else None,
         )
 

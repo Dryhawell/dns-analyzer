@@ -28,6 +28,7 @@ from analyzer.cname import CnameTargetObservation
 from analyzer.soa import SoaNsObservation
 from analyzer.caa import CaaObservation
 from analyzer.cds import CdsObservation
+from analyzer.nsec import NsecObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -64,7 +65,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC observations."""
 
     def analyze(
         self,
@@ -88,6 +89,7 @@ class SecurityAnalyzer:
         naptr: NaptrObservation | None = None,
         uri: UriObservation | None = None,
         cds: CdsObservation | None = None,
+        nsec: NsecObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -101,6 +103,8 @@ class SecurityAnalyzer:
             findings.extend(self._uri(uri))
         if cds is not None:
             findings.extend(self._cds(cds))
+        if nsec is not None:
+            findings.extend(self._nsec(nsec))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
@@ -557,6 +561,42 @@ class SecurityAnalyzer:
                         "registry or submit a DS update."
                     ),
                     code="cds_missing",
+                )
+            ]
+        return []
+
+    def _nsec(self, observation: NsecObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="NSEC/NSEC3PARAM could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "NSEC set, and it is not broken DNSSEC or a compromise."
+                    ),
+                    recommendation=(
+                        "Retry the NSEC/NSEC3PARAM lookup before treating "
+                        "authenticated denial as unpublished."
+                    ),
+                    code="nsec_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="NSEC/NSEC3PARAM not published",
+                    description=(
+                        f"No NSEC or NSEC3PARAM record at {observation.query_name}. "
+                        "Unsigned zones typically publish neither. "
+                        "This is not broken DNSSEC and is not a compromise."
+                    ),
+                    recommendation=(
+                        "NSEC/NSEC3PARAM describe authenticated denial of existence. "
+                        "This tool does not walk the NSEC/NSEC3 chain or query NSEC3."
+                    ),
+                    code="nsec_missing",
                 )
             ]
         return []

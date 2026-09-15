@@ -8,6 +8,7 @@ from analyzer.cname import CnameTargetObservation, evaluate_cname_targets
 from analyzer.soa import SoaNsObservation, evaluate_soa_ns
 from analyzer.caa import CaaObservation, evaluate_caa
 from analyzer.cds import CdsObservation, evaluate_cds
+from analyzer.nsec import NsecObservation, evaluate_nsec
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa
 from analyzer.dmarc import DmarcObservation, evaluate_dmarc
@@ -103,4 +104,6 @@ __all__ = [
     "evaluate_caa",
     "CdsObservation",
     "evaluate_cds",
+    "NsecObservation",
+    "evaluate_nsec",
 ]
