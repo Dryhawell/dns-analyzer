@@ -2,6 +2,24 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.23.0 — 2026-09-16
+
+ZONEMD listing. The zone digest is listed, not recomputed and not fetched via AXFR.
+
+### Added
+
+- Default / `--security` / `--all` list up to 8 ZONEMD records (serial, scheme, hash algorithm, digest length)
+- CLI/JSON/HTML include `zonemd`
+- Findings: `zonemd_missing` / `zonemd_unreadable` are info (+0)
+- `--record ZONEMD` is rejected with a hint to use default / `--security`
+
+### Notes
+
+- Missing ZONEMD is common and is not broken DNSSEC
+- This tool does not AXFR/IXFR the zone or recompute the digest
+- Digest bytes are not dumped; only digest length is listed
+- The serial is a change counter, not a security score
+
 ## 1.22.0 — 2026-09-15
 
 CSYNC listing. Child-to-parent NS/A/AAAA signaling is listed, not applied.

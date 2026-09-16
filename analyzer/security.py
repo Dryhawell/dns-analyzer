@@ -30,6 +30,7 @@ from analyzer.caa import CaaObservation
 from analyzer.cds import CdsObservation
 from analyzer.nsec import NsecObservation
 from analyzer.csync import CsyncObservation
+from analyzer.zonemd import ZonemdObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -66,7 +67,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD observations."""
 
     def analyze(
         self,
@@ -92,6 +93,7 @@ class SecurityAnalyzer:
         cds: CdsObservation | None = None,
         nsec: NsecObservation | None = None,
         csync: CsyncObservation | None = None,
+        zonemd: ZonemdObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -109,6 +111,8 @@ class SecurityAnalyzer:
             findings.extend(self._nsec(nsec))
         if csync is not None:
             findings.extend(self._csync(csync))
+        if zonemd is not None:
+            findings.extend(self._zonemd(zonemd))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
@@ -638,6 +642,42 @@ class SecurityAnalyzer:
                         "registry or update parent delegation."
                     ),
                     code="csync_missing",
+                )
+            ]
+        return []
+
+    def _zonemd(self, observation: ZonemdObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="ZONEMD could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "ZONEMD set, and it is not broken DNSSEC or a compromise."
+                    ),
+                    recommendation=(
+                        "Retry the ZONEMD lookup before treating the zone digest "
+                        "as unpublished."
+                    ),
+                    code="zonemd_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="ZONEMD not published",
+                    description=(
+                        f"No ZONEMD record at {observation.query_name}. "
+                        "Absence is common. This is not broken DNSSEC and is not "
+                        "a compromise."
+                    ),
+                    recommendation=(
+                        "ZONEMD is an optional zone digest (RFC 8976). "
+                        "This tool does not AXFR the zone or recompute the digest."
+                    ),
+                    code="zonemd_missing",
                 )
             ]
         return []

@@ -22,6 +22,7 @@ def _bind_lookup(mock_cls) -> None:
     from analyzer.cds import evaluate_cds
     from analyzer.nsec import evaluate_nsec
     from analyzer.csync import evaluate_csync
+    from analyzer.zonemd import evaluate_zonemd
     from analyzer.sshfp import evaluate_sshfp
     from analyzer.tlsa import evaluate_tlsa
     from analyzer.mtasts import evaluate_mta_sts
@@ -77,6 +78,9 @@ def _bind_lookup(mock_cls) -> None:
         "example.com", nsec_found=False, nsec3param_found=False
     )
     mock_cls.return_value.inspect_csync.return_value = evaluate_csync(
+        "example.com", found=False
+    )
+    mock_cls.return_value.inspect_zonemd.return_value = evaluate_zonemd(
         "example.com", found=False
     )
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs

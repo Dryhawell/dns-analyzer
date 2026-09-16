@@ -67,6 +67,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["cds"] is None
     assert payload["nsec"] is None
     assert payload["csync"] is None
+    assert payload["zonemd"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["naptr"] is None
@@ -524,6 +525,53 @@ def test_json_and_html_include_csync() -> None:
                         immediate=False,
                         soa_minimum=False,
                         types=("<script>x</script>",),
+                    ),
+                ),
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_zonemd() -> None:
+    from analyzer.zonemd import ZonemdRecord, evaluate_zonemd
+
+    observation = evaluate_zonemd(
+        "example.com",
+        found=True,
+        zonemd=(
+            ZonemdRecord(
+                serial=2026091601,
+                scheme=1,
+                scheme_meaning="SIMPLE",
+                hash_algorithm=1,
+                hash_meaning="SHA-384",
+                digest_length=48,
+            ),
+        ),
+    )
+    result = _result(zonemd=observation)
+    payload = result_to_dict(result)
+    assert payload["zonemd"]["status"] == "FOUND"
+    assert payload["zonemd"]["zonemd"][0]["serial"] == 2026091601
+    assert payload["zonemd"]["zonemd"][0]["digest_length"] == 48
+    page = dumps_html(result)
+    assert "SHA-384" in page
+    assert "digest length 48" in page
+    xss = dumps_html(
+        _result(
+            zonemd=evaluate_zonemd(
+                "example.com",
+                found=True,
+                zonemd=(
+                    ZonemdRecord(
+                        serial=1,
+                        scheme=1,
+                        scheme_meaning="<script>x</script>",
+                        hash_algorithm=1,
+                        hash_meaning="SHA-384",
+                        digest_length=48,
                     ),
                 ),
             )

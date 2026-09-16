@@ -23,6 +23,7 @@ from analyzer.caa import CaaObservation, CaaProperty
 from analyzer.cds import CdnskeyRecord, CdsObservation, CdsRecord
 from analyzer.nsec import Nsec3ParamRecord, NsecObservation, NsecRecord
 from analyzer.csync import CsyncObservation, CsyncRecord
+from analyzer.zonemd import ZonemdObservation, ZonemdRecord
 from analyzer.sshfp import SshfpFingerprint, SshfpObservation
 from analyzer.tlsa import TlsaObservation, TlsaAssociation
 from analyzer.compare import ResolverComparison
@@ -90,6 +91,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "cds": _cds_dict(result.cds),
         "nsec": _nsec_dict(result.nsec),
         "csync": _csync_dict(result.csync),
+        "zonemd": _zonemd_dict(result.zonemd),
         "dkim": [_dkim_dict(item) for item in result.dkim] if result.dkim is not None else None,
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
@@ -589,6 +591,30 @@ def _csync_record_dict(item: CsyncRecord) -> dict[str, object]:
     }
 
 
+def _zonemd_dict(observation: ZonemdObservation | None) -> dict[str, object] | None:
+    if observation is None:
+        return None
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "zonemd": [_zonemd_record_dict(item) for item in observation.zonemd],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _zonemd_record_dict(item: ZonemdRecord) -> dict[str, object]:
+    return {
+        "serial": item.serial,
+        "scheme": item.scheme,
+        "scheme_meaning": item.scheme_meaning,
+        "hash_algorithm": item.hash_algorithm,
+        "hash_meaning": item.hash_meaning,
+        "digest_length": item.digest_length,
+    }
+
+
 def _dkim_dict(observation: DkimObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -756,6 +782,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_nsec(result.nsec))
     if result.csync is not None:
         parts.extend(_html_csync(result.csync))
+    if result.zonemd is not None:
+        parts.extend(_html_zonemd(result.zonemd))
     if result.spf is not None:
         parts.extend(_html_spf(result.spf))
     if result.dmarc is not None:
@@ -1036,6 +1064,37 @@ def _html_csync(observation: CsyncObservation) -> list[str]:
         if observation.truncated:
             parts.append(
                 '<p class="note">more than 8 CSYNC records; extras were not listed.</p>'
+            )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_zonemd(observation: ZonemdObservation) -> list[str]:
+    parts = [
+        "<h2>ZONEMD</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No ZONEMD records at this name.</p>")
+    if observation.zonemd:
+        parts.append("<p>ZONEMD:</p>")
+        parts.append("<ul>")
+        for item in observation.zonemd:
+            parts.append(
+                "<li>"
+                f"serial {item.serial} scheme {item.scheme} "
+                f"hash {item.hash_algorithm} "
+                f"({_e(item.scheme_meaning)}, {_e(item.hash_meaning)}, "
+                f"digest length {item.digest_length})"
+                "</li>"
+            )
+        parts.append("</ul>")
+        if observation.truncated:
+            parts.append(
+                '<p class="note">more than 8 ZONEMD records; extras were not listed.</p>'
             )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

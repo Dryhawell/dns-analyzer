@@ -73,6 +73,7 @@ from analyzer.nsec import (
     parse_nsec3param,
 )
 from analyzer.csync import CsyncObservation, evaluate_csync, parse_csync
+from analyzer.zonemd import ZonemdObservation, evaluate_zonemd, parse_zonemd
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import (
@@ -832,6 +833,23 @@ class DNSResolver:
             host,
             found=found,
             csync=records,
+            truncated=truncated,
+            error="; ".join(errors) if errors else None,
+        )
+
+    def inspect_zonemd(self, name: str) -> ZonemdObservation:
+        """Look for ZONEMD. Does not AXFR or recompute the digest."""
+        host = name.rstrip(".").lower()
+        client = self._edns_client()
+        errors: list[str] = []
+        found, _, rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "ZONEMD", errors)
+        )
+        records, truncated = parse_zonemd(rdatas)
+        return evaluate_zonemd(
+            host,
+            found=found,
+            zonemd=records,
             truncated=truncated,
             error="; ".join(errors) if errors else None,
         )

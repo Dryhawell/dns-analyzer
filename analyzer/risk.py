@@ -55,6 +55,8 @@ WEIGHTS: dict[str, int] = {
     "nsec_missing": 0,
     "csync_unreadable": 0,
     "csync_missing": 0,
+    "zonemd_unreadable": 0,
+    "zonemd_missing": 0,
     "mtasts_unreadable": 0,
     "mtasts_missing": 0,
     "mtasts_multiple": 5,
