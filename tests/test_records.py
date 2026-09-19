@@ -241,3 +241,14 @@ def test_uri_bytes_target() -> None:
     assert format_rdata("URI", rdata) == '20 5 "ftp://ftp.example.com/pub"'
     row = records_from_answer("URI", "example.com", SimpleAnswer(rdata))[0]
     assert dict(row.details)["Target"] == "ftp://ftp.example.com/pub"
+
+
+def test_dname_value_strips_trailing_dot() -> None:
+    rdata = DummyRdata("unused", target="other.example.net.")
+    assert format_rdata("DNAME", rdata) == "other.example.net"
+    row = records_from_answer("DNAME", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    assert row.name == "example.com"
+    details = dict(row.details)
+    assert details["Target"] == "other.example.net"
+    assert "synthesize" in details["Note"].lower()
+    assert "subtree" in details["Note"].lower()

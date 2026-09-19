@@ -253,6 +253,7 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
+    mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.inspect_cds.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_nsec.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_csync.assert_called_once_with("example.com")
@@ -1038,6 +1039,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
+    mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A",)
     )
@@ -1088,6 +1090,7 @@ def test_cli_security_flag_skips_record_dump(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_zonemd.assert_called_once()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
+    mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A", "AAAA", "CNAME", "TXT", "CAA")
     )
@@ -1125,6 +1128,8 @@ def test_cli_all_flag_is_full_report(mock_resolver_cls, capsys) -> None:
     assert "A RECORDS" in output
     assert "SECURITY ANALYSIS" in output
     assert "RISK SCORE" in output
+    mock_resolver_cls.return_value.inspect_uri.assert_not_called()
+    mock_resolver_cls.return_value.inspect_dname.assert_not_called()
 
 
 def test_cli_rejects_unknown_record_type(capsys) -> None:
@@ -1469,6 +1474,7 @@ def test_cli_uri_prints_section(mock_resolver_cls, capsys) -> None:
     assert "https://www.example.com/path" in output
     assert "SECURITY ANALYSIS" not in output
     mock_resolver_cls.return_value.inspect_uri.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
     mock_resolver_cls.return_value.inspect_cds.assert_not_called()
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
@@ -1503,6 +1509,61 @@ def test_cli_uri_json_includes_observation(mock_resolver_cls, capsys) -> None:
     assert data["uri"]["uris"][0]["target"] == "ftp://ftp.example.com/pub"
 
 
+def test_cli_record_dname_hints_dname_flag(capsys) -> None:
+    assert run(["example.com", "--record", "DNAME"]) == 1
+    err = capsys.readouterr().err
+    assert "--dname" in err
+    assert "opt-in" in err.lower() or "subtree" in err.lower() or "synthesize" in err.lower()
+
+
+def test_cli_rejects_reverse_with_dname(capsys) -> None:
+    assert run(["--reverse", "8.8.8.8", "--dname"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_dname_prints_section(mock_resolver_cls, capsys) -> None:
+    from analyzer.dname import evaluate_dname
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_dname.return_value = evaluate_dname(
+        "example.com",
+        [DNSRecord("DNAME", "example.com", "other.example.net", 300)],
+    )
+
+    assert run(["example.com", "--record", "A", "--dname"]) == 0
+    output = capsys.readouterr().out
+    assert "DNAME" in output
+    assert "FOUND" in output
+    assert "other.example.net" in output
+    assert "SECURITY ANALYSIS" not in output
+    mock_resolver_cls.return_value.inspect_dname.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_dname_json_includes_observation(mock_resolver_cls, capsys) -> None:
+    from analyzer.dname import evaluate_dname
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_dname.return_value = evaluate_dname(
+        "example.com",
+        [DNSRecord("DNAME", "example.com", "other.example.net", 60)],
+    )
+
+    assert run(["example.com", "--dname", "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["dname"]["status"] == "FOUND"
+    assert data["dname"]["dnames"][0]["target"] == "other.example.net"
+
+
 def test_cli_help_lists_modes() -> None:
     help_text = build_parser().format_help()
     assert "--record" in help_text
@@ -1511,6 +1572,7 @@ def test_cli_help_lists_modes() -> None:
     assert "--srv" in help_text
     assert "--naptr" in help_text
     assert "--uri" in help_text
+    assert "--dname" in help_text
     assert "--all" in help_text
     assert "--reverse" in help_text
     assert "--format" in help_text
@@ -1556,6 +1618,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["srv"] is None
     assert data["naptr"] is None
     assert data["uri"] is None
+    assert data["dname"] is None
     assert data["mta_sts"]["query_name"] == "_mta-sts.example.com"
     assert data["tls_rpt"]["query_name"] == "_smtp._tls.example.com"
     assert data["bimi"]["query_name"] == "default._bimi.example.com"

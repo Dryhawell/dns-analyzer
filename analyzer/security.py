@@ -21,6 +21,7 @@ from analyzer.spf import SpfHop, SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
+from analyzer.dname import DnameObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -67,7 +68,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD observations."""
 
     def analyze(
         self,
@@ -90,6 +91,7 @@ class SecurityAnalyzer:
         caa: CaaObservation | None = None,
         naptr: NaptrObservation | None = None,
         uri: UriObservation | None = None,
+        dname: DnameObservation | None = None,
         cds: CdsObservation | None = None,
         nsec: NsecObservation | None = None,
         csync: CsyncObservation | None = None,
@@ -105,6 +107,8 @@ class SecurityAnalyzer:
             findings.extend(self._naptr(naptr))
         if uri is not None:
             findings.extend(self._uri(uri))
+        if dname is not None:
+            findings.extend(self._dname(dname))
         if cds is not None:
             findings.extend(self._cds(cds))
         if nsec is not None:
@@ -532,6 +536,40 @@ class SecurityAnalyzer:
                         "and does not fetch the target."
                     ),
                     code="uri_missing",
+                )
+            ]
+        return []
+
+    def _dname(self, observation: DnameObservation) -> list[SecurityFinding]:
+        if observation.error:
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="DNAME could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "DNAME set, and it is not a compromise."
+                    ),
+                    recommendation="Retry the lookup before treating DNAME as unpublished.",
+                    code="dname_unreadable",
+                )
+            ]
+        if observation.status == "NOT DETECTED":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="DNAME not published",
+                    description=(
+                        f"No DNAME record was found at {observation.query_name}. "
+                        "Most names do not publish DNAME. This is not proof that "
+                        "a subtree is unused."
+                    ),
+                    recommendation=(
+                        "Use --dname only when you expect a subtree redirect at this "
+                        "name. This tool does not synthesize CNAME records or walk "
+                        "names under this node."
+                    ),
+                    code="dname_missing",
                 )
             ]
         return []

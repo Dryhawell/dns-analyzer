@@ -39,6 +39,7 @@ from analyzer.spf import SpfObservation
 from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation, NaptrRewrite
 from analyzer.uri import UriObservation, UriTarget
+from analyzer.dname import DnameObservation, DnameTarget
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.version import __version__
 
@@ -96,6 +97,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "srv": [_srv_dict(item) for item in result.srv] if result.srv is not None else None,
         "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
         "uri": _uri_dict(result.uri) if result.uri is not None else None,
+        "dname": _dname_dict(result.dname) if result.dname is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -687,6 +689,21 @@ def _uri_target_dict(item: UriTarget) -> dict[str, object]:
     }
 
 
+def _dname_dict(observation: DnameObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "dnames": [_dname_target_dict(item) for item in observation.dnames],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _dname_target_dict(item: DnameTarget) -> dict[str, object]:
+    return {"target": item.target}
+
+
 def _security_dict(report: SecurityReport | None) -> dict[str, object] | None:
     if report is None:
         return None
@@ -820,6 +837,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_naptr(result.naptr))
     if result.uri is not None:
         parts.extend(_html_uri(result.uri))
+    if result.dname is not None:
+        parts.extend(_html_dname(result.dname))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -1531,6 +1550,29 @@ def _html_uri(observation: UriObservation) -> list[str]:
     if observation.truncated:
         parts.append(
             '<p class="note">more than 8 URI records; extras were not listed.</p>'
+        )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_dname(observation: DnameObservation) -> list[str]:
+    parts = [
+        "<h2>DNAME</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No DNAME records at this name.</p>")
+    if observation.dnames:
+        parts.append("<ul>")
+        for item in observation.dnames:
+            parts.append(f"<li>target <code>{_e(item.target)}</code></li>")
+        parts.append("</ul>")
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 DNAME records; extras were not listed.</p>'
         )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

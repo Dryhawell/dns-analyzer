@@ -2,6 +2,25 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.24.0 — 2026-09-19
+
+DNAME listing. CNAME is not synthesized and the subtree is not walked.
+
+### Added
+
+- Opt-in `--dname` lists up to 8 DNAME targets
+- CLI/JSON/HTML include `dname` only when `--dname` is used
+- Findings: `dname_missing` / `dname_unreadable` are info (+0)
+- `--record DNAME` is rejected with a hint to use `--dname`
+
+### Notes
+
+- Missing DNAME is common and is not a compromise
+- This tool does not synthesize CNAME records for names under the node
+- This tool does not walk the subtree
+- This tool does not fetch HTTP
+- A published target is a DNS suffix, not a site this tool visited
+
 ## 1.23.0 — 2026-09-16
 
 ZONEMD listing. The zone digest is listed, not recomputed and not fetched via AXFR.

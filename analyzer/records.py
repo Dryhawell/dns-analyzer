@@ -37,6 +37,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
     if rtype == "URI":
         return _format_uri(rdata)
 
+    if rtype == "DNAME":
+        return _text(getattr(rdata, "target", rdata))
+
     if rtype == "TXT":
         strings = getattr(rdata, "strings", None)
         if strings is None:
@@ -116,6 +119,16 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         return _naptr_details(rdata)
     if rtype == "URI":
         return _uri_details(rdata)
+    if rtype == "DNAME":
+        target = _text(getattr(rdata, "target", rdata))
+        return (
+            ("Target", target),
+            (
+                "Note",
+                "DNAME redirects a subtree; this tool does not synthesize CNAME "
+                "or walk names under this node.",
+            ),
+        )
     if rtype == "CAA":
         tag = getattr(rdata, "tag", "")
         if isinstance(tag, bytes):

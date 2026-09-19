@@ -72,6 +72,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["srv"] is None
     assert payload["naptr"] is None
     assert payload["uri"] is None
+    assert payload["dname"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -383,6 +384,45 @@ def test_json_and_html_include_uri() -> None:
                         "URI",
                         "example.com",
                         '10 1 "https://example.com/<script>alert(1)</script>"',
+                        60,
+                    )
+                ],
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_dname() -> None:
+    from analyzer.dname import evaluate_dname
+
+    observation = evaluate_dname(
+        "example.com",
+        [
+            DNSRecord(
+                "DNAME",
+                "example.com",
+                "other.example.net",
+                300,
+            )
+        ],
+    )
+    result = _result(dname=observation)
+    payload = result_to_dict(result)
+    assert payload["dname"]["status"] == "FOUND"
+    assert payload["dname"]["dnames"][0]["target"] == "other.example.net"
+    page = dumps_html(result)
+    assert "other.example.net" in page
+    xss = dumps_html(
+        _result(
+            dname=evaluate_dname(
+                "example.com",
+                [
+                    DNSRecord(
+                        "DNAME",
+                        "example.com",
+                        "<script>alert(1)</script>",
                         60,
                     )
                 ],

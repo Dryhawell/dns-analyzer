@@ -88,6 +88,7 @@ from analyzer.spf import SpfObservation, expand_spf as apply_spf_hops
 from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
 from analyzer.naptr import NaptrObservation, evaluate_naptr
 from analyzer.uri import UriObservation, evaluate_uri
+from analyzer.dname import DnameObservation, evaluate_dname
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa, tlsa_query_name
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt, tls_rpt_query_name
@@ -735,6 +736,20 @@ class DNSResolver:
 
     def resolve_uri(self, name: str) -> list[DNSRecord]:
         return self._query(name, "URI")
+
+    def inspect_dname(self, name: str) -> DnameObservation:
+        """DNAME lookup at <name>. Does not synthesize CNAME or walk the subtree."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_dname(host)
+        except DomainNotFoundError:
+            return evaluate_dname(host, ())
+        except DNSQueryError as exc:
+            return evaluate_dname(host, (), error=str(exc))
+        return evaluate_dname(host, records)
+
+    def resolve_dname(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "DNAME")
 
     def expand_spf(self, observation: SpfObservation) -> SpfObservation:
         """Look up include:/redirect= one hop. Nested include: is listed, not queried."""
