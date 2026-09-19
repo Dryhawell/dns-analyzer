@@ -52,6 +52,7 @@ from analyzer.cds import CdsObservation
 from analyzer.nsec import NsecObservation
 from analyzer.csync import CsyncObservation
 from analyzer.zonemd import ZonemdObservation
+from analyzer.rrsig import RrsigObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.models import CoreLookup, DNSRecord
@@ -106,7 +107,7 @@ Examples:
   python main.py --version
 
 Default (no --record / --security) is the same as --all: every record
-type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, NSEC/NSEC3PARAM, CSYNC, ZONEMD, findings, and the local risk score.
+type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, NSEC/NSEC3PARAM, CSYNC, ZONEMD, RRSIG, findings, and the local risk score.
 --dkim SELECTOR is opt-in; selectors are never guessed.
 --srv SERVICE is opt-in; service names (sip, xmpp, …) are never guessed.
 --naptr is opt-in; ENUM/SIP applications are never guessed.
@@ -115,7 +116,7 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
 MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, or DNAME is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD are also observations, not hijacking.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG are also observations, not hijacking.
 """
 
 
@@ -124,7 +125,7 @@ class ReportView:
     """What the CLI should print after a forward lookup.
 
     record_types is None → all core types. An empty frozenset → no record
-    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/CNAME targets/SOA-NS/CAA summary/CDS/CDNSKEY/NSEC/CSYNC/ZONEMD/findings/score.
+    sections (security-only). show_security covers DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/DANE TLSA/SSHFP/FCrDNS/MX hosts/NS hosts/CNAME targets/SOA-NS/CAA summary/CDS/CDNSKEY/NSEC/CSYNC/ZONEMD/RRSIG/findings/score.
     """
 
     record_types: frozenset[str] | None
@@ -191,13 +192,14 @@ def build_parser() -> argparse.ArgumentParser:
             "CDS/CDNSKEY are in the security view, not --record CDS. "
             "NSEC/NSEC3PARAM are in the security view, not --record NSEC. "
             "CSYNC is in the security view, not --record CSYNC. "
-            "ZONEMD is in the security view, not --record ZONEMD."
+            "ZONEMD is in the security view, not --record ZONEMD. "
+            "RRSIG is in the security view, not --record RRSIG."
         ),
     )
     parser.add_argument(
         "--security",
         action="store_true",
-        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, NSEC/NSEC3PARAM, CSYNC, ZONEMD, findings, and the local risk score",
+        help="Show DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA summary, CDS/CDNSKEY, NSEC/NSEC3PARAM, CSYNC, ZONEMD, RRSIG, findings, and the local risk score",
     )
     parser.add_argument(
         "--dkim",
@@ -306,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -370,6 +372,12 @@ def _record_type_error(raw: str) -> str:
         return (
             "ZONEMD is listed with default / --security (RFC 8976 zone digest). "
             "This tool does not AXFR the zone or recompute the digest. "
+            "It is not a --record dump type."
+        )
+    if kind == "RRSIG":
+        return (
+            "RRSIG is listed with default / --security (RFC 4034 signatures). "
+            "This tool does not validate signatures or walk the chain of trust. "
             "It is not a --record dump type."
         )
     allowed = ", ".join(_RECORD_ORDER)
@@ -746,6 +754,7 @@ def _print_lookup(
     nsec: NsecObservation | None = None,
     csync: CsyncObservation | None = None,
     zonemd: ZonemdObservation | None = None,
+    rrsig: RrsigObservation | None = None,
     naptr: NaptrObservation | None = None,
     uri: UriObservation | None = None,
     dname: DnameObservation | None = None,
@@ -820,16 +829,18 @@ def _print_lookup(
             or nsec is None
             or csync is None
             or zonemd is None
+            or rrsig is None
             or security is None
         ):
             raise RuntimeError(
-                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD results."
+                "Security view is missing DNSSEC/SPF/DMARC/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX/NS host/CNAME target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG results."
             )
         _print_dnssec(dnssec)
         _print_cds(cds)
         _print_nsec(nsec)
         _print_csync(csync)
         _print_zonemd(zonemd)
+        _print_rrsig(rrsig)
         _print_spf(spf)
         _print_dmarc(dmarc)
         _print_mta_sts(mta_sts)
@@ -996,6 +1007,33 @@ def _print_zonemd(observation: ZonemdObservation) -> None:
             )
         if observation.truncated:
             print("  Note: more than 8 ZONEMD records; extras were not listed.")
+    if observation.error:
+        print(f"Note: {observation.error}")
+    print()
+    print(observation.note)
+    print()
+
+
+def _print_rrsig(observation: RrsigObservation) -> None:
+    print("RRSIG")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No RRSIG records at this name.")
+    if observation.rrsig:
+        print("RRSIG:")
+        for item in observation.rrsig:
+            print(
+                f"  {item.type_covered_name} alg {item.algorithm} "
+                f"({item.algorithm_meaning}) labels {item.labels} "
+                f"origttl {item.original_ttl} "
+                f"{item.inception_utc} → {item.expiration_utc} "
+                f"key {item.key_tag} signer {item.signer} "
+                f"(sig length {item.signature_length})"
+            )
+        if observation.truncated:
+            print("  Note: more than 8 RRSIG records; extras were not listed.")
     if observation.error:
         print(f"Note: {observation.error}")
     print()
@@ -1807,6 +1845,7 @@ def _run(argv: list[str] | None = None) -> int:
     nsec = None
     csync = None
     zonemd = None
+    rrsig = None
     naptr_observation = None
     uri_observation = None
     dname_observation = None
@@ -1834,6 +1873,7 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_nsec = pool.submit(resolver.inspect_nsec, domain)
                 fut_csync = pool.submit(resolver.inspect_csync, domain)
                 fut_zonemd = pool.submit(resolver.inspect_zonemd, domain)
+                fut_rrsig = pool.submit(resolver.inspect_rrsig, domain)
                 fut_dkim = [
                     pool.submit(resolver.inspect_dkim, domain, sel)
                     for sel in selectors
@@ -1868,6 +1908,7 @@ def _run(argv: list[str] | None = None) -> int:
                 nsec = fut_nsec.result()
                 csync = fut_csync.result()
                 zonemd = fut_zonemd.result()
+                rrsig = fut_rrsig.result()
                 if selectors:
                     dkim_observations = tuple(item.result() for item in fut_dkim)
                 if srv_specs:
@@ -1905,6 +1946,7 @@ def _run(argv: list[str] | None = None) -> int:
                 nsec=nsec,
                 csync=csync,
                 zonemd=zonemd,
+                rrsig=rrsig,
             )
         elif selectors or srv_specs or args.naptr or args.uri or args.dname:
             extra = len(selectors) + len(srv_specs) + extra_optin
@@ -2000,6 +2042,7 @@ def _run(argv: list[str] | None = None) -> int:
         nsec=nsec,
         csync=csync,
         zonemd=zonemd,
+        rrsig=rrsig,
         dkim=dkim_observations,
         srv=srv_observations,
         naptr=naptr_observation,
@@ -2046,6 +2089,7 @@ def _run(argv: list[str] | None = None) -> int:
             nsec,
             csync,
             zonemd,
+            rrsig,
             naptr_observation,
             uri_observation,
             dname_observation,

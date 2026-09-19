@@ -68,6 +68,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["nsec"] is None
     assert payload["csync"] is None
     assert payload["zonemd"] is None
+    assert payload["rrsig"] is None
     assert payload["dkim"] is None
     assert payload["srv"] is None
     assert payload["naptr"] is None
@@ -612,6 +613,68 @@ def test_json_and_html_include_zonemd() -> None:
                         hash_algorithm=1,
                         hash_meaning="SHA-384",
                         digest_length=48,
+                    ),
+                ),
+            )
+        )
+    )
+    assert "<script>x</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_rrsig() -> None:
+    from analyzer.rrsig import RrsigRecord, evaluate_rrsig
+
+    observation = evaluate_rrsig(
+        "example.com",
+        found=True,
+        rrsig=(
+            RrsigRecord(
+                type_covered=1,
+                type_covered_name="A",
+                algorithm=13,
+                algorithm_meaning="ECDSAP256SHA256",
+                labels=2,
+                original_ttl=300,
+                inception=1758240000,
+                expiration=1760918400,
+                inception_utc="2025-09-19T00:00:00Z",
+                expiration_utc="2025-10-20T00:00:00Z",
+                key_tag=2371,
+                signer="example.com",
+                signature_length=64,
+            ),
+        ),
+    )
+    result = _result(rrsig=observation)
+    payload = result_to_dict(result)
+    assert payload["rrsig"]["status"] == "FOUND"
+    assert payload["rrsig"]["rrsig"][0]["type_covered_name"] == "A"
+    assert payload["rrsig"]["rrsig"][0]["key_tag"] == 2371
+    assert payload["rrsig"]["rrsig"][0]["signature_length"] == 64
+    page = dumps_html(result)
+    assert "ECDSAP256SHA256" in page
+    assert "sig length 64" in page
+    xss = dumps_html(
+        _result(
+            rrsig=evaluate_rrsig(
+                "example.com",
+                found=True,
+                rrsig=(
+                    RrsigRecord(
+                        type_covered=1,
+                        type_covered_name="A",
+                        algorithm=13,
+                        algorithm_meaning="<script>x</script>",
+                        labels=2,
+                        original_ttl=300,
+                        inception=1758240000,
+                        expiration=1760918400,
+                        inception_utc="2025-09-19T00:00:00Z",
+                        expiration_utc="2025-10-20T00:00:00Z",
+                        key_tag=2371,
+                        signer="example.com",
+                        signature_length=64,
                     ),
                 ),
             )

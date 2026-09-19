@@ -2,6 +2,25 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.25.0 — 2026-09-19
+
+RRSIG listing. Signatures are listed, not validated.
+
+### Added
+
+- Default / `--security` / `--all` list up to 8 RRSIG records (type covered, algorithm, labels, original TTL, inception, expiration, key tag, signer, signature length)
+- CLI/JSON/HTML include `rrsig`
+- Findings: `rrsig_missing` / `rrsig_unreadable` are info (+0)
+- `--record RRSIG` is rejected with a hint to use default / `--security`
+
+### Notes
+
+- Missing RRSIG is common on unsigned zones and is not broken DNSSEC
+- This tool does not validate signatures or check the key tag against DNSKEY
+- This tool does not walk the chain of trust
+- Signature bytes are not dumped; only signature length is listed
+- Inception and expiration are listed as published UTC; this is not a valid/invalid verdict
+
 ## 1.24.0 — 2026-09-19
 
 DNAME listing. CNAME is not synthesized and the subtree is not walked.

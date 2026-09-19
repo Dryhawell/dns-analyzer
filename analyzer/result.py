@@ -31,6 +31,7 @@ from analyzer.cds import CdsObservation
 from analyzer.nsec import NsecObservation
 from analyzer.csync import CsyncObservation
 from analyzer.zonemd import ZonemdObservation
+from analyzer.rrsig import RrsigObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -64,6 +65,7 @@ class DNSAnalysisResult:
     nsec: NsecObservation | None = None
     csync: CsyncObservation | None = None
     zonemd: ZonemdObservation | None = None
+    rrsig: RrsigObservation | None = None
     dkim: tuple[DkimObservation, ...] | None = None
     srv: tuple[SrvObservation, ...] | None = None
     naptr: NaptrObservation | None = None

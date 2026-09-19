@@ -32,6 +32,7 @@ from analyzer.cds import CdsObservation
 from analyzer.nsec import NsecObservation
 from analyzer.csync import CsyncObservation
 from analyzer.zonemd import ZonemdObservation
+from analyzer.rrsig import RrsigObservation
 from analyzer.sshfp import SshfpObservation
 from analyzer.tlsa import TlsaObservation
 from analyzer.tlsrpt import TlsRptObservation
@@ -68,7 +69,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
 
     def analyze(
         self,
@@ -96,6 +97,7 @@ class SecurityAnalyzer:
         nsec: NsecObservation | None = None,
         csync: CsyncObservation | None = None,
         zonemd: ZonemdObservation | None = None,
+        rrsig: RrsigObservation | None = None,
     ) -> SecurityReport:
         findings: list[SecurityFinding] = []
         findings.extend(self._dnssec(dnssec))
@@ -117,6 +119,8 @@ class SecurityAnalyzer:
             findings.extend(self._csync(csync))
         if zonemd is not None:
             findings.extend(self._zonemd(zonemd))
+        if rrsig is not None:
+            findings.extend(self._rrsig(rrsig))
         if mta_sts is not None:
             findings.extend(self._mta_sts(mta_sts))
         if tls_rpt is not None:
@@ -716,6 +720,41 @@ class SecurityAnalyzer:
                         "This tool does not AXFR the zone or recompute the digest."
                     ),
                     code="zonemd_missing",
+                )
+            ]
+        return []
+
+    def _rrsig(self, observation: RrsigObservation) -> list[SecurityFinding]:
+        if observation.error and observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="RRSIG could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "RRSIG set, and it is not broken DNSSEC or a compromise."
+                    ),
+                    recommendation=(
+                        "Retry the RRSIG lookup before treating signatures as unpublished."
+                    ),
+                    code="rrsig_unreadable",
+                )
+            ]
+        if observation.status != "FOUND":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="RRSIG not published",
+                    description=(
+                        f"No RRSIG record at {observation.query_name}. "
+                        "Absence is common on unsigned zones. This is not broken "
+                        "DNSSEC and is not a compromise."
+                    ),
+                    recommendation=(
+                        "RRSIG is the DNSSEC signature over an RRset (RFC 4034). "
+                        "This tool lists signatures; it does not validate them."
+                    ),
+                    code="rrsig_missing",
                 )
             ]
         return []

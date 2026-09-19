@@ -7,6 +7,7 @@ import ipaddress
 from analyzer.models import DNSRecord
 from analyzer.naptr import flags_meaning
 from analyzer.uri import scheme_meaning, uri_scheme
+from analyzer.rrsig import format_rrsig_value, rrsig_details
 from analyzer.sshfp import algorithm_meaning, fingerprint_hex, fp_type_meaning
 from analyzer.tlsa import (
     association_hex,
@@ -76,6 +77,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
     if rtype == "SSHFP":
         return _format_sshfp(rdata)
 
+    if rtype == "RRSIG":
+        return format_rrsig_value(rdata)
+
     if rtype in {"A", "AAAA"}:
         return canonicalize_ip(_text(rdata))
 
@@ -119,6 +123,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         return _naptr_details(rdata)
     if rtype == "URI":
         return _uri_details(rdata)
+    if rtype == "RRSIG":
+        return rrsig_details(rdata)
     if rtype == "DNAME":
         target = _text(getattr(rdata, "target", rdata))
         return (

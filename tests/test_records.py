@@ -252,3 +252,31 @@ def test_dname_value_strips_trailing_dot() -> None:
     assert details["Target"] == "other.example.net"
     assert "synthesize" in details["Note"].lower()
     assert "subtree" in details["Note"].lower()
+
+
+def test_rrsig_value_lists_fields_without_signature_bytes() -> None:
+    rdata = DummyRdata(
+        "unused",
+        type_covered=1,
+        algorithm=13,
+        labels=2,
+        original_ttl=300,
+        inception=1758240000,
+        expiration=1760918400,
+        key_tag=2371,
+        signer="example.com.",
+        signature=b"\xab" * 64,
+    )
+    value = format_rdata("RRSIG", rdata)
+    assert "A" in value
+    assert "alg 13" in value
+    assert "key 2371" in value
+    assert "sig length 64" in value
+    assert "abab" not in value.lower()
+    row = records_from_answer("RRSIG", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    details = dict(row.details)
+    assert details["Type covered"] == "1 A"
+    assert "ECDSAP256SHA256" in details["Algorithm"]
+    assert details["Signer"] == "example.com"
+    assert details["Signature length"] == "64"
+    assert "not validated" in details["Note"].lower()

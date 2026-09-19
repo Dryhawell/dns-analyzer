@@ -21,6 +21,7 @@ from analyzer.cds import CdnskeyRecord, CdsRecord, evaluate_cds
 from analyzer.nsec import Nsec3ParamRecord, NsecRecord, evaluate_nsec
 from analyzer.csync import CsyncRecord, evaluate_csync
 from analyzer.zonemd import ZonemdRecord, evaluate_zonemd
+from analyzer.rrsig import RrsigRecord, evaluate_rrsig
 from analyzer.sshfp import evaluate_sshfp
 from analyzer.tlsa import evaluate_tlsa
 from analyzer.mtasts import evaluate_mta_sts
@@ -191,6 +192,10 @@ def _zonemd() -> object:
     return evaluate_zonemd("example.com", found=False)
 
 
+def _rrsig() -> object:
+    return evaluate_rrsig("example.com", found=False)
+
+
 def _bind(
     mock_cls,
     lookup: CoreLookup,
@@ -211,6 +216,7 @@ def _bind(
     nsec=None,
     csync=None,
     zonemd=None,
+    rrsig=None,
 ) -> None:
     mock_cls.return_value.lookup_core.return_value = lookup
     mock_cls.return_value.inspect_dnssec.return_value = dnssec or _dnssec()
@@ -232,6 +238,7 @@ def _bind(
     mock_cls.return_value.inspect_nsec.return_value = nsec or _nsec()
     mock_cls.return_value.inspect_csync.return_value = csync or _csync()
     mock_cls.return_value.inspect_zonemd.return_value = zonemd or _zonemd()
+    mock_cls.return_value.inspect_rrsig.return_value = rrsig or _rrsig()
     mock_cls.return_value.expand_spf.side_effect = lambda obs: obs
 
 
@@ -258,6 +265,7 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_csync.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_zonemd.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_rrsig.assert_called_once_with("example.com")
     output = capsys.readouterr().out
     assert "Target:" in output
     assert "example.com" in output
@@ -403,6 +411,7 @@ def test_cli_record_https_skips_security(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A", "HTTPS")
     )
@@ -564,6 +573,7 @@ def test_cli_prints_cds_records(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_csync.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_zonemd.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_rrsig.assert_called_once_with("example.com")
 
 
 @patch("cli.interface.DNSResolver")
@@ -605,6 +615,7 @@ def test_cli_prints_nsec_records(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_csync.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_zonemd.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_rrsig.assert_called_once_with("example.com")
 
 
 @patch("cli.interface.DNSResolver")
@@ -636,6 +647,7 @@ def test_cli_prints_csync_records(mock_resolver_cls, capsys) -> None:
     assert "parent registry" in output
     mock_resolver_cls.return_value.inspect_csync.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_zonemd.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_rrsig.assert_called_once_with("example.com")
 
 
 @patch("cli.interface.DNSResolver")
@@ -668,6 +680,46 @@ def test_cli_prints_zonemd_records(mock_resolver_cls, capsys) -> None:
     assert "digest length 48" in output
     assert "AXFR" in output
     mock_resolver_cls.return_value.inspect_zonemd.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_rrsig.assert_called_once_with("example.com")
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_prints_rrsig_records(mock_resolver_cls, capsys) -> None:
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+        rrsig=evaluate_rrsig(
+            "example.com",
+            found=True,
+            rrsig=(
+                RrsigRecord(
+                    type_covered=1,
+                    type_covered_name="A",
+                    algorithm=13,
+                    algorithm_meaning="ECDSAP256SHA256",
+                    labels=2,
+                    original_ttl=300,
+                    inception=1758240000,
+                    expiration=1760918400,
+                    inception_utc="2025-09-19T00:00:00Z",
+                    expiration_utc="2025-10-20T00:00:00Z",
+                    key_tag=2371,
+                    signer="example.com",
+                    signature_length=64,
+                ),
+            ),
+        ),
+    )
+
+    assert run(["example.com", "--security"]) == 0
+    output = capsys.readouterr().out
+    assert "RRSIG" in output
+    assert "Status: FOUND" in output
+    assert "ECDSAP256SHA256" in output
+    assert "key 2371" in output
+    assert "sig length 64" in output
+    assert "not validate" in output
+    mock_resolver_cls.return_value.inspect_rrsig.assert_called_once_with("example.com")
 
 
 @patch("cli.interface.DNSResolver")
@@ -1019,6 +1071,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
     mock_resolver_cls.return_value.inspect_dmarc.assert_not_called()
     mock_resolver_cls.return_value.inspect_mta_sts.assert_not_called()
     mock_resolver_cls.return_value.inspect_tls_rpt.assert_not_called()
@@ -1035,6 +1088,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
     mock_resolver_cls.return_value.inspect_dkim.assert_not_called()
     mock_resolver_cls.return_value.inspect_srv.assert_not_called()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
@@ -1088,6 +1142,7 @@ def test_cli_security_flag_skips_record_dump(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_called_once()
     mock_resolver_cls.return_value.inspect_csync.assert_called_once()
     mock_resolver_cls.return_value.inspect_zonemd.assert_called_once()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_called_once()
     mock_resolver_cls.return_value.inspect_naptr.assert_not_called()
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
     mock_resolver_cls.return_value.inspect_dname.assert_not_called()
@@ -1205,6 +1260,13 @@ def test_cli_record_zonemd_hints_security_view(capsys) -> None:
     assert "AXFR" in err or "--security" in err or "security" in err.lower()
 
 
+def test_cli_record_rrsig_hints_security_view(capsys) -> None:
+    assert run(["example.com", "--record", "RRSIG"]) == 1
+    err = capsys.readouterr().err
+    assert "RRSIG" in err
+    assert "validate" in err.lower() or "--security" in err or "security" in err.lower()
+
+
 def test_cli_rejects_all_with_record(capsys) -> None:
     assert run(["example.com", "--all", "--record", "A"]) == 1
     assert "Do not combine --all" in capsys.readouterr().err
@@ -1272,6 +1334,7 @@ def test_cli_dkim_prints_section(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")
@@ -1335,6 +1398,7 @@ def test_cli_srv_prints_section(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
     called_spec = mock_resolver_cls.return_value.inspect_srv.call_args[0][1]
     assert called_spec.service == "sip"
     assert called_spec.protocol == "tcp"
@@ -1406,6 +1470,7 @@ def test_cli_naptr_prints_section(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")
@@ -1480,6 +1545,7 @@ def test_cli_uri_prints_section(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")
@@ -1543,6 +1609,7 @@ def test_cli_dname_prints_section(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_dname.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")
@@ -1636,6 +1703,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["nsec"]["nsec_found"] is False
     assert data["csync"]["status"] == "NOT DETECTED"
     assert data["zonemd"]["status"] == "NOT DETECTED"
+    assert data["rrsig"]["status"] == "NOT DETECTED"
 
 
 @patch("cli.interface.DNSResolver")
@@ -1659,6 +1727,7 @@ def test_cli_format_csv_stdout(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
         "example.com", types=("A",)
     )
@@ -1766,6 +1835,7 @@ def test_cli_nxdomain_exits_one(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_nsec.assert_not_called()
     mock_resolver_cls.return_value.inspect_csync.assert_not_called()
     mock_resolver_cls.return_value.inspect_zonemd.assert_not_called()
+    mock_resolver_cls.return_value.inspect_rrsig.assert_not_called()
 
 
 @patch("cli.interface.DNSResolver")

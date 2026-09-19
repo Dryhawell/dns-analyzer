@@ -74,6 +74,7 @@ from analyzer.nsec import (
 )
 from analyzer.csync import CsyncObservation, evaluate_csync, parse_csync
 from analyzer.zonemd import ZonemdObservation, evaluate_zonemd, parse_zonemd
+from analyzer.rrsig import RrsigObservation, evaluate_rrsig, parse_rrsig
 from analyzer.dmarc import DmarcObservation, dmarc_query_name, evaluate_dmarc
 from analyzer.dkim import DkimObservation, dkim_query_name, evaluate_dkim
 from analyzer.dnssec import (
@@ -865,6 +866,23 @@ class DNSResolver:
             host,
             found=found,
             zonemd=records,
+            truncated=truncated,
+            error="; ".join(errors) if errors else None,
+        )
+
+    def inspect_rrsig(self, name: str) -> RrsigObservation:
+        """Look for RRSIG. Does not validate signatures or walk the chain."""
+        host = name.rstrip(".").lower()
+        client = self._edns_client()
+        errors: list[str] = []
+        found, _, rdatas = self._unpack_dnssec_probe(
+            self._dnssec_probe(client, name, "RRSIG", errors)
+        )
+        records, truncated = parse_rrsig(rdatas)
+        return evaluate_rrsig(
+            host,
+            found=found,
+            rrsig=records,
             truncated=truncated,
             error="; ".join(errors) if errors else None,
         )
