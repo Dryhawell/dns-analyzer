@@ -21,6 +21,7 @@ from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
+from analyzer.ipseckey import IpseckeyObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -71,6 +72,7 @@ class DNSAnalysisResult:
     naptr: NaptrObservation | None = None
     uri: UriObservation | None = None
     dname: DnameObservation | None = None
+    ipseckey: IpseckeyObservation | None = None
     security: SecurityReport | None = None
     ptr_query: str | None = None
     view_record_types: tuple[str, ...] | None = None

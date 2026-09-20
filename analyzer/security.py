@@ -22,6 +22,7 @@ from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
+from analyzer.ipseckey import IpseckeyObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -69,7 +70,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/IPSECKEY/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
 
     def analyze(
         self,
@@ -93,6 +94,7 @@ class SecurityAnalyzer:
         naptr: NaptrObservation | None = None,
         uri: UriObservation | None = None,
         dname: DnameObservation | None = None,
+        ipseckey: IpseckeyObservation | None = None,
         cds: CdsObservation | None = None,
         nsec: NsecObservation | None = None,
         csync: CsyncObservation | None = None,
@@ -111,6 +113,8 @@ class SecurityAnalyzer:
             findings.extend(self._uri(uri))
         if dname is not None:
             findings.extend(self._dname(dname))
+        if ipseckey is not None:
+            findings.extend(self._ipseckey(ipseckey))
         if cds is not None:
             findings.extend(self._cds(cds))
         if nsec is not None:
@@ -574,6 +578,43 @@ class SecurityAnalyzer:
                         "names under this node."
                     ),
                     code="dname_missing",
+                )
+            ]
+        return []
+
+    def _ipseckey(self, observation: IpseckeyObservation) -> list[SecurityFinding]:
+        if observation.error:
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="IPSECKEY could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "IPSECKEY set, and it is not a compromise."
+                    ),
+                    recommendation=(
+                        "Retry the lookup before treating IPSECKEY as unpublished."
+                    ),
+                    code="ipseckey_unreadable",
+                )
+            ]
+        if observation.status == "NOT DETECTED":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="IPSECKEY not published",
+                    description=(
+                        f"No IPSECKEY record was found at {observation.query_name}. "
+                        "Most names do not publish IPSECKEY. This is not proof that "
+                        "IPsec is unused or misconfigured."
+                    ),
+                    recommendation=(
+                        "Use --ipseckey only when you expect IPsec gateway records "
+                        "at this name. This tool does not probe IPsec or IKE, "
+                        "does not dump key material, and does not resolve a "
+                        "gateway domain name."
+                    ),
+                    code="ipseckey_missing",
                 )
             ]
         return []

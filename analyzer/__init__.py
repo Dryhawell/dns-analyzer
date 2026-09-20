@@ -42,6 +42,7 @@ from analyzer.srv import SrvObservation, evaluate_srv
 from analyzer.naptr import NaptrObservation, evaluate_naptr
 from analyzer.uri import UriObservation, evaluate_uri
 from analyzer.dname import DnameObservation, evaluate_dname
+from analyzer.ipseckey import IpseckeyObservation, evaluate_ipseckey
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt
 from analyzer.validator import DomainValidationError, is_valid_domain, normalize_domain
@@ -86,6 +87,8 @@ __all__ = [
     "evaluate_uri",
     "DnameObservation",
     "evaluate_dname",
+    "IpseckeyObservation",
+    "evaluate_ipseckey",
     "MtaStsObservation",
     "evaluate_mta_sts",
     "TlsRptObservation",

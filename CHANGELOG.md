@@ -2,6 +2,25 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.26.0 — 2026-09-19
+
+IPSECKEY listing. IPsec is not probed and key material is not dumped.
+
+### Added
+
+- Opt-in `--ipseckey` lists up to 8 IPSECKEY records (precedence, gateway type, algorithm, gateway, key length)
+- CLI/JSON/HTML include `ipseckey` only when `--ipseckey` is used
+- Findings: `ipseckey_missing` / `ipseckey_unreadable` are info (+0)
+- `--record IPSECKEY` is rejected with a hint to use `--ipseckey`
+
+### Notes
+
+- Missing IPSECKEY is common and is not a compromise
+- This tool does not probe IPsec or IKE
+- Key material is not dumped; only key length is listed
+- A gateway domain name is not resolved or followed
+- A published gateway is text in DNS, not an IPsec session this tool established
+
 ## 1.25.0 — 2026-09-19
 
 RRSIG listing. Signatures are listed, not validated.

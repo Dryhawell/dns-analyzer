@@ -8,6 +8,7 @@ from analyzer.models import DNSRecord
 from analyzer.naptr import flags_meaning
 from analyzer.uri import scheme_meaning, uri_scheme
 from analyzer.rrsig import format_rrsig_value, rrsig_details
+from analyzer.ipseckey import format_ipseckey_value, ipseckey_details
 from analyzer.sshfp import algorithm_meaning, fingerprint_hex, fp_type_meaning
 from analyzer.tlsa import (
     association_hex,
@@ -40,6 +41,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
 
     if rtype == "DNAME":
         return _text(getattr(rdata, "target", rdata))
+
+    if rtype == "IPSECKEY":
+        return format_ipseckey_value(rdata)
 
     if rtype == "TXT":
         strings = getattr(rdata, "strings", None)
@@ -135,6 +139,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
                 "or walk names under this node.",
             ),
         )
+    if rtype == "IPSECKEY":
+        return ipseckey_details(rdata)
     if rtype == "CAA":
         tag = getattr(rdata, "tag", "")
         if isinstance(tag, bytes):

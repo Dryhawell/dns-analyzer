@@ -90,6 +90,7 @@ from analyzer.srv import SrvObservation, SrvSpec, evaluate_srv, srv_query_name
 from analyzer.naptr import NaptrObservation, evaluate_naptr
 from analyzer.uri import UriObservation, evaluate_uri
 from analyzer.dname import DnameObservation, evaluate_dname
+from analyzer.ipseckey import IpseckeyObservation, evaluate_ipseckey
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa, tlsa_query_name
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt, tls_rpt_query_name
@@ -751,6 +752,20 @@ class DNSResolver:
 
     def resolve_dname(self, name: str) -> list[DNSRecord]:
         return self._query(name, "DNAME")
+
+    def inspect_ipseckey(self, name: str) -> IpseckeyObservation:
+        """IPSECKEY lookup at <name>. Does not probe IPsec or follow the gateway."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_ipseckey(host)
+        except DomainNotFoundError:
+            return evaluate_ipseckey(host, ())
+        except DNSQueryError as exc:
+            return evaluate_ipseckey(host, (), error=str(exc))
+        return evaluate_ipseckey(host, records)
+
+    def resolve_ipseckey(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "IPSECKEY")
 
     def expand_spf(self, observation: SpfObservation) -> SpfObservation:
         """Look up include:/redirect= one hop. Nested include: is listed, not queried."""

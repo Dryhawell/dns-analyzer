@@ -41,6 +41,7 @@ from analyzer.srv import SrvObservation
 from analyzer.naptr import NaptrObservation, NaptrRewrite
 from analyzer.uri import UriObservation, UriTarget
 from analyzer.dname import DnameObservation, DnameTarget
+from analyzer.ipseckey import IpseckeyObservation, IpseckeyRecord
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.version import __version__
 
@@ -100,6 +101,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "naptr": _naptr_dict(result.naptr) if result.naptr is not None else None,
         "uri": _uri_dict(result.uri) if result.uri is not None else None,
         "dname": _dname_dict(result.dname) if result.dname is not None else None,
+        "ipseckey": _ipseckey_dict(result.ipseckey) if result.ipseckey is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -737,6 +739,29 @@ def _dname_target_dict(item: DnameTarget) -> dict[str, object]:
     return {"target": item.target}
 
 
+def _ipseckey_dict(observation: IpseckeyObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "ipseckeys": [_ipseckey_record_dict(item) for item in observation.ipseckeys],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _ipseckey_record_dict(item: IpseckeyRecord) -> dict[str, object]:
+    return {
+        "precedence": item.precedence,
+        "gateway_type": item.gateway_type,
+        "gateway_type_meaning": item.gateway_type_meaning,
+        "algorithm": item.algorithm,
+        "algorithm_meaning": item.algorithm_meaning,
+        "gateway": item.gateway,
+        "key_length": item.key_length,
+    }
+
+
 def _security_dict(report: SecurityReport | None) -> dict[str, object] | None:
     if report is None:
         return None
@@ -874,6 +899,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_uri(result.uri))
     if result.dname is not None:
         parts.extend(_html_dname(result.dname))
+    if result.ipseckey is not None:
+        parts.extend(_html_ipseckey(result.ipseckey))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -1641,6 +1668,45 @@ def _html_dname(observation: DnameObservation) -> list[str]:
     if observation.truncated:
         parts.append(
             '<p class="note">more than 8 DNAME records; extras were not listed.</p>'
+        )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_ipseckey(observation: IpseckeyObservation) -> list[str]:
+    parts = [
+        "<h2>IPSECKEY</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No IPSECKEY records at this name.</p>")
+    if observation.ipseckeys:
+        parts.extend(
+            [
+                "<table>",
+                "<thead><tr><th>Precedence</th><th>Gateway type</th>"
+                "<th>Algorithm</th><th>Gateway</th><th>Key length</th>"
+                "</tr></thead>",
+                "<tbody>",
+            ]
+        )
+        for item in observation.ipseckeys:
+            parts.append(
+                "<tr>"
+                f"<td>{item.precedence}</td>"
+                f"<td>{item.gateway_type} {_e(item.gateway_type_meaning)}</td>"
+                f"<td>{item.algorithm} {_e(item.algorithm_meaning)}</td>"
+                f"<td><code>{_e(item.gateway)}</code></td>"
+                f"<td>{item.key_length}</td>"
+                "</tr>"
+            )
+        parts.extend(["</tbody>", "</table>"])
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 IPSECKEY records; extras were not listed.</p>'
         )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

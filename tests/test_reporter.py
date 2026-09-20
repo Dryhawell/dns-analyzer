@@ -74,6 +74,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["naptr"] is None
     assert payload["uri"] is None
     assert payload["dname"] is None
+    assert payload["ipseckey"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -424,6 +425,47 @@ def test_json_and_html_include_dname() -> None:
                         "DNAME",
                         "example.com",
                         "<script>alert(1)</script>",
+                        60,
+                    )
+                ],
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_ipseckey() -> None:
+    from analyzer.ipseckey import evaluate_ipseckey
+
+    observation = evaluate_ipseckey(
+        "example.com",
+        [
+            DNSRecord(
+                "IPSECKEY",
+                "example.com",
+                "10 1 2 192.0.2.1 key-length=64",
+                300,
+            )
+        ],
+    )
+    result = _result(ipseckey=observation)
+    payload = result_to_dict(result)
+    assert payload["ipseckey"]["status"] == "FOUND"
+    assert payload["ipseckey"]["ipseckeys"][0]["gateway"] == "192.0.2.1"
+    assert payload["ipseckey"]["ipseckeys"][0]["key_length"] == 64
+    page = dumps_html(result)
+    assert "192.0.2.1" in page
+    assert "IPSECKEY" in page
+    xss = dumps_html(
+        _result(
+            ipseckey=evaluate_ipseckey(
+                "example.com",
+                [
+                    DNSRecord(
+                        "IPSECKEY",
+                        "example.com",
+                        "10 3 2 <script>alert(1)</script> key-length=8",
                         60,
                     )
                 ],

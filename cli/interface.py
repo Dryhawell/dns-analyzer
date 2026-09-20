@@ -68,6 +68,7 @@ from analyzer.srv import SrvObservation, SrvSpecError, normalize_srv_specs
 from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
+from analyzer.ipseckey import IpseckeyObservation
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
@@ -99,6 +100,7 @@ Examples:
   python main.py example.com --naptr
   python main.py example.com --uri
   python main.py example.com --dname
+  python main.py example.com --ipseckey
   python main.py example.com --format json
   python main.py example.com --format html --output reports/example_com.html
   python main.py example.com --output reports/example_com.json
@@ -113,10 +115,11 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 --naptr is opt-in; ENUM/SIP applications are never guessed.
 --uri is opt-in; the target is not fetched and service prefixes are never guessed.
 --dname is opt-in; CNAME is not synthesized and the subtree is not walked.
+--ipseckey is opt-in; IPsec is not probed and key material is not dumped.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, or DNAME is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG are also observations, not hijacking.
+MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, DNAME, or IPSECKEY is an observation, not proof of compromise.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG / missing IPSECKEY are also observations, not hijacking.
 """
 
 
@@ -187,6 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
             "SRV is --srv, not --record SRV. NAPTR is --naptr, not --record NAPTR. "
             "URI is --uri, not --record URI. "
             "DNAME is --dname, not --record DNAME. "
+            "IPSECKEY is --ipseckey, not --record IPSECKEY. "
             "TLSA is DANE at _443._tcp, not --record TLSA. "
             "SSHFP is in the security view, not --record SSHFP. "
             "CDS/CDNSKEY are in the security view, not --record CDS. "
@@ -249,6 +253,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--ipseckey",
+        action="store_true",
+        help=(
+            "Look up IPSECKEY at this domain (precedence, gateway type, "
+            "algorithm, gateway, key length). IPsec is not probed; key "
+            "material is not dumped; a gateway domain name is not resolved."
+        ),
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         help="Show every record type plus security analysis (default)",
@@ -308,7 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "IPSECKEY", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -335,6 +348,12 @@ def _record_type_error(raw: str) -> str:
         return (
             "DNAME is opt-in. Use --dname. This tool does not synthesize CNAME "
             "records or walk names under this node."
+        )
+    if kind == "IPSECKEY":
+        return (
+            "IPSECKEY is opt-in. Use --ipseckey. This tool does not probe IPsec "
+            "or IKE, does not dump key material, and does not resolve a "
+            "gateway domain name."
         )
     if kind == "TLSA":
         return (
@@ -406,9 +425,10 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
         or args.naptr
         or args.uri
         or args.dname
+        or args.ipseckey
     ):
         return (
-            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname) "
+            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname/--ipseckey) "
             "or --reverse, not both."
         )
 
@@ -758,6 +778,7 @@ def _print_lookup(
     naptr: NaptrObservation | None = None,
     uri: UriObservation | None = None,
     dname: DnameObservation | None = None,
+    ipseckey: IpseckeyObservation | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -809,6 +830,8 @@ def _print_lookup(
         _print_uri(uri)
     if dname is not None:
         _print_dname(dname)
+    if ipseckey is not None:
+        _print_ipseckey(ipseckey)
     if view.show_security:
         if (
             dnssec is None
@@ -1474,6 +1497,34 @@ def _print_dname(observation: DnameObservation) -> None:
     print()
 
 
+def _print_ipseckey(observation: IpseckeyObservation) -> None:
+    print("IPSECKEY")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No IPSECKEY records at this name.")
+    for item in observation.ipseckeys:
+        print(
+            f"  {item.precedence} {item.gateway_type} {item.algorithm} "
+            f"{item.gateway} key-length={item.key_length}"
+        )
+        print(f"Precedence: {item.precedence} — lower number is preferred")
+        print(f"Gateway type: {item.gateway_type} — {item.gateway_type_meaning}")
+        print(f"Algorithm: {item.algorithm} — {item.algorithm_meaning}")
+        print(f"Gateway: {item.gateway}")
+        print(f"Key length: {item.key_length}")
+        print()
+    if observation.truncated:
+        print("Note: more than 8 IPSECKEY records; extras were not listed.")
+        print()
+    if observation.error:
+        print(f"Note: {observation.error}")
+        print()
+    print(observation.note)
+    print()
+
+
 def _print_security(report: SecurityReport) -> None:
     print("SECURITY ANALYSIS")
     print("────────────────────────")
@@ -1669,6 +1720,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --naptr")
     print("       python main.py <domain> --uri")
     print("       python main.py <domain> --dname")
+    print("       python main.py <domain> --ipseckey")
     print("       python main.py <domain> --format json")
     print("       python main.py <domain> --format html --output reports/example.html")
     print("       python main.py <domain> --output reports/example.json")
@@ -1760,6 +1812,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.naptr
             or args.uri
             or args.dname
+            or args.ipseckey
         )
         if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
@@ -1849,9 +1902,13 @@ def _run(argv: list[str] | None = None) -> int:
     naptr_observation = None
     uri_observation = None
     dname_observation = None
+    ipseckey_observation = None
     try:
         extra_optin = (
-            (1 if args.naptr else 0) + (1 if args.uri else 0) + (1 if args.dname else 0)
+            (1 if args.naptr else 0)
+            + (1 if args.uri else 0)
+            + (1 if args.dname else 0)
+            + (1 if args.ipseckey else 0)
         )
         if view.show_security:
             workers = 8 + len(selectors) + len(srv_specs) + extra_optin
@@ -1891,6 +1948,11 @@ def _run(argv: list[str] | None = None) -> int:
                 fut_dname = (
                     pool.submit(resolver.inspect_dname, domain) if args.dname else None
                 )
+                fut_ipseckey = (
+                    pool.submit(resolver.inspect_ipseckey, domain)
+                    if args.ipseckey
+                    else None
+                )
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
                 mta_sts = fut_mtasts.result()
@@ -1919,6 +1981,8 @@ def _run(argv: list[str] | None = None) -> int:
                     uri_observation = fut_uri.result()
                 if fut_dname is not None:
                     dname_observation = fut_dname.result()
+                if fut_ipseckey is not None:
+                    ipseckey_observation = fut_ipseckey.result()
             spf = inspect_spf(lookup.txt, lookup.errors)
             spf = resolver.expand_spf(spf)
             security = SecurityAnalyzer().analyze(
@@ -1942,13 +2006,14 @@ def _run(argv: list[str] | None = None) -> int:
                 naptr=naptr_observation,
                 uri=uri_observation,
                 dname=dname_observation,
+                ipseckey=ipseckey_observation,
                 cds=cds,
                 nsec=nsec,
                 csync=csync,
                 zonemd=zonemd,
                 rrsig=rrsig,
             )
-        elif selectors or srv_specs or args.naptr or args.uri or args.dname:
+        elif selectors or srv_specs or args.naptr or args.uri or args.dname or args.ipseckey:
             extra = len(selectors) + len(srv_specs) + extra_optin
             if extra >= 2:
                 with ThreadPoolExecutor(max_workers=min(8, extra)) as pool:
@@ -1969,6 +2034,11 @@ def _run(argv: list[str] | None = None) -> int:
                     fut_dname = (
                         pool.submit(resolver.inspect_dname, domain) if args.dname else None
                     )
+                    fut_ipseckey = (
+                        pool.submit(resolver.inspect_ipseckey, domain)
+                        if args.ipseckey
+                        else None
+                    )
                     if selectors:
                         dkim_observations = tuple(item.result() for item in fut_dkim)
                     if srv_specs:
@@ -1979,6 +2049,8 @@ def _run(argv: list[str] | None = None) -> int:
                         uri_observation = fut_uri.result()
                     if fut_dname is not None:
                         dname_observation = fut_dname.result()
+                    if fut_ipseckey is not None:
+                        ipseckey_observation = fut_ipseckey.result()
             else:
                 if selectors:
                     dkim_observations = tuple(
@@ -1994,6 +2066,8 @@ def _run(argv: list[str] | None = None) -> int:
                     uri_observation = resolver.inspect_uri(domain)
                 if args.dname:
                     dname_observation = resolver.inspect_dname(domain)
+                if args.ipseckey:
+                    ipseckey_observation = resolver.inspect_ipseckey(domain)
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
         _print_dns_failure(exc, domain)
@@ -2048,6 +2122,7 @@ def _run(argv: list[str] | None = None) -> int:
         naptr=naptr_observation,
         uri=uri_observation,
         dname=dname_observation,
+        ipseckey=ipseckey_observation,
         security=security,
         view_record_types=_view_record_types(view),
         view_security=view.show_security,
@@ -2093,6 +2168,7 @@ def _run(argv: list[str] | None = None) -> int:
             naptr_observation,
             uri_observation,
             dname_observation,
+            ipseckey_observation,
         )
         if comparison is not None:
             _print_comparison(comparison)

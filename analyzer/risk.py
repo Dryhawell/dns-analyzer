@@ -51,6 +51,8 @@ WEIGHTS: dict[str, int] = {
     "uri_missing": 0,
     "dname_unreadable": 0,
     "dname_missing": 0,
+    "ipseckey_unreadable": 0,
+    "ipseckey_missing": 0,
     "cds_unreadable": 0,
     "cds_missing": 0,
     "nsec_unreadable": 0,

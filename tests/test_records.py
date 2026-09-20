@@ -254,6 +254,45 @@ def test_dname_value_strips_trailing_dot() -> None:
     assert "subtree" in details["Note"].lower()
 
 
+def test_ipseckey_value_lists_fields_without_key_bytes() -> None:
+    rdata = DummyRdata(
+        "unused",
+        precedence=10,
+        gateway_type=1,
+        algorithm=2,
+        gateway="192.0.2.1",
+        key=b"\xab" * 64,
+    )
+    value = format_rdata("IPSECKEY", rdata)
+    assert value == "10 1 2 192.0.2.1 key-length=64"
+    assert "abab" not in value.lower()
+    row = records_from_answer("IPSECKEY", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    assert row.name == "example.com"
+    details = dict(row.details)
+    assert details["Precedence"].startswith("10")
+    assert "IPv4" in details["Gateway type"]
+    assert "RSA" in details["Algorithm"]
+    assert details["Gateway"] == "192.0.2.1"
+    assert details["Key length"] == "64"
+    assert "not probed" in details["Note"].lower()
+    assert "not dumped" in details["Note"].lower()
+
+
+def test_ipseckey_domain_gateway_strips_dot() -> None:
+    rdata = DummyRdata(
+        "unused",
+        precedence=5,
+        gateway_type=3,
+        algorithm=2,
+        gateway="gw.example.net.",
+        key=b"\x00" * 8,
+    )
+    assert format_rdata("IPSECKEY", rdata) == "5 3 2 gw.example.net key-length=8"
+    row = records_from_answer("IPSECKEY", "example.com", SimpleAnswer(rdata))[0]
+    assert dict(row.details)["Gateway"] == "gw.example.net"
+    assert "domain name" in dict(row.details)["Gateway type"]
+
+
 def test_rrsig_value_lists_fields_without_signature_bytes() -> None:
     rdata = DummyRdata(
         "unused",
