@@ -2,6 +2,26 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.27.0 — 2026-09-22
+
+SMIMEA listing. DANE for S/MIME is listed; certificates are not fetched.
+
+### Added
+
+- Opt-in `--smimea LOCALPART` lists up to 8 SMIMEA records per local-part (usage, selector, matching, association length)
+- CLI/JSON/HTML include `smimea` only when `--smimea` is used
+- Findings: `smimea_missing` / `smimea_unreadable` are info (+0)
+- `--record SMIMEA` is rejected with a hint to use `--smimea`
+
+### Notes
+
+- Missing SMIMEA is common and is not a compromise
+- Local-parts are never guessed; pass the mailbox local-part (the part before @)
+- This tool does not send email or fetch certificates
+- Association bytes are not dumped; only association length is listed
+- Listing a SMIMEA record is not S/MIME or certificate validation
+- SMIMEA is DANE for S/MIME (RFC 8162), not TLSA for HTTPS
+
 ## 1.26.0 — 2026-09-19
 
 IPSECKEY listing. IPsec is not probed and key material is not dumped.

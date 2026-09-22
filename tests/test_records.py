@@ -293,6 +293,27 @@ def test_ipseckey_domain_gateway_strips_dot() -> None:
     assert "domain name" in dict(row.details)["Gateway type"]
 
 
+def test_smimea_value_lists_length_without_association_bytes() -> None:
+    rdata = DummyRdata(
+        "unused",
+        usage=3,
+        selector=1,
+        mtype=1,
+        cert=b"\xab" * 32,
+    )
+    value = format_rdata("SMIMEA", rdata)
+    assert value == "3 1 1 assoc-length=32"
+    assert "abab" not in value.lower()
+    row = records_from_answer("SMIMEA", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    details = dict(row.details)
+    assert "DANE-EE" in details["Usage"]
+    assert "SPKI" in details["Selector"]
+    assert "SHA-256" in details["Matching"]
+    assert details["Association length"] == "32"
+    assert "not fetched" in details["Note"].lower()
+    assert "not dumped" in details["Note"].lower()
+
+
 def test_rrsig_value_lists_fields_without_signature_bytes() -> None:
     rdata = DummyRdata(
         "unused",

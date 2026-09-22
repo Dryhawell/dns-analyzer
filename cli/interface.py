@@ -31,6 +31,11 @@ from analyzer.config import (
 )
 from analyzer.dmarc import DmarcObservation
 from analyzer.dkim import DkimObservation, DkimSelectorError, normalize_selectors
+from analyzer.smimea import (
+    SmimeaObservation,
+    SmimeaLocalpartError,
+    normalize_localparts,
+)
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
     DNSNetworkError,
@@ -101,6 +106,7 @@ Examples:
   python main.py example.com --uri
   python main.py example.com --dname
   python main.py example.com --ipseckey
+  python main.py example.com --smimea alice
   python main.py example.com --format json
   python main.py example.com --format html --output reports/example_com.html
   python main.py example.com --output reports/example_com.json
@@ -116,10 +122,11 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 --uri is opt-in; the target is not fetched and service prefixes are never guessed.
 --dname is opt-in; CNAME is not synthesized and the subtree is not walked.
 --ipseckey is opt-in; IPsec is not probed and key material is not dumped.
+--smimea LOCALPART is opt-in; local-parts are never guessed; missing SMIMEA is an observation.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, DNAME, or IPSECKEY is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG / missing IPSECKEY are also observations, not hijacking.
+MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, DNAME, IPSECKEY, or SMIMEA is an observation, not proof of compromise.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG / missing IPSECKEY / missing SMIMEA are also observations, not hijacking.
 """
 
 
@@ -191,6 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
             "URI is --uri, not --record URI. "
             "DNAME is --dname, not --record DNAME. "
             "IPSECKEY is --ipseckey, not --record IPSECKEY. "
+            "SMIMEA is --smimea, not --record SMIMEA. "
             "TLSA is DANE at _443._tcp, not --record TLSA. "
             "SSHFP is in the security view, not --record SSHFP. "
             "CDS/CDNSKEY are in the security view, not --record CDS. "
@@ -262,6 +270,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--smimea",
+        action="append",
+        dest="smimea_localparts",
+        metavar="LOCALPART",
+        help=(
+            "Look up SMIMEA for this mailbox local-part "
+            "(hash._smimecert.<domain>, RFC 8162). Repeatable, max 8. "
+            "Local-parts are never guessed. Certificates are not fetched."
+        ),
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         help="Show every record type plus security analysis (default)",
@@ -321,7 +340,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "IPSECKEY", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "IPSECKEY", "SMIMEA", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -354,6 +373,11 @@ def _record_type_error(raw: str) -> str:
             "IPSECKEY is opt-in. Use --ipseckey. This tool does not probe IPsec "
             "or IKE, does not dump key material, and does not resolve a "
             "gateway domain name."
+        )
+    if kind == "SMIMEA":
+        return (
+            "SMIMEA is opt-in. Use --smimea <local-part>. Local-parts are never "
+            "guessed. This tool does not send email or fetch certificates."
         )
     if kind == "TLSA":
         return (
@@ -426,9 +450,10 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
         or args.uri
         or args.dname
         or args.ipseckey
+        or args.smimea_localparts
     ):
         return (
-            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname/--ipseckey) "
+            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname/--ipseckey/--smimea) "
             "or --reverse, not both."
         )
 
@@ -779,6 +804,7 @@ def _print_lookup(
     uri: UriObservation | None = None,
     dname: DnameObservation | None = None,
     ipseckey: IpseckeyObservation | None = None,
+    smimea: tuple[SmimeaObservation, ...] | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -832,6 +858,9 @@ def _print_lookup(
         _print_dname(dname)
     if ipseckey is not None:
         _print_ipseckey(ipseckey)
+    if smimea:
+        for item in smimea:
+            _print_smimea(item)
     if view.show_security:
         if (
             dnssec is None
@@ -1525,6 +1554,34 @@ def _print_ipseckey(observation: IpseckeyObservation) -> None:
     print()
 
 
+def _print_smimea(observation: SmimeaObservation) -> None:
+    print("SMIMEA")
+    print("────────────────────────")
+    print(f"Local-part: {observation.local_part}")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No SMIMEA records for this local-part.")
+    for item in observation.associations:
+        print(
+            f"  {item.usage} {item.selector} {item.matching_type} "
+            f"assoc-length={item.association_length}"
+        )
+        print(f"Usage: {item.usage} — {item.usage_meaning}")
+        print(f"Selector: {item.selector} — {item.selector_meaning}")
+        print(f"Matching: {item.matching_type} — {item.matching_meaning}")
+        print(f"Association length: {item.association_length}")
+        print()
+    if observation.truncated:
+        print("Note: more than 8 SMIMEA records; extras were not listed.")
+        print()
+    if observation.error:
+        print(f"Note: {observation.error}")
+        print()
+    print(observation.note)
+    print()
+
+
 def _print_security(report: SecurityReport) -> None:
     print("SECURITY ANALYSIS")
     print("────────────────────────")
@@ -1721,6 +1778,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --uri")
     print("       python main.py <domain> --dname")
     print("       python main.py <domain> --ipseckey")
+    print("       python main.py <domain> --smimea alice")
     print("       python main.py <domain> --format json")
     print("       python main.py <domain> --format html --output reports/example.html")
     print("       python main.py <domain> --output reports/example.json")
@@ -1813,6 +1871,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.uri
             or args.dname
             or args.ipseckey
+            or args.smimea_localparts
         )
         if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
@@ -1845,6 +1904,18 @@ def _run(argv: list[str] | None = None) -> int:
     except DkimSelectorError as exc:
         _configure_logging()
         _log.error("Invalid DKIM selector")
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        localparts = (
+            normalize_localparts(args.smimea_localparts)
+            if args.smimea_localparts
+            else ()
+        )
+    except SmimeaLocalpartError as exc:
+        _configure_logging()
+        _log.error("Invalid SMIMEA local-part")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -1903,6 +1974,7 @@ def _run(argv: list[str] | None = None) -> int:
     uri_observation = None
     dname_observation = None
     ipseckey_observation = None
+    smimea_observations = None
     try:
         extra_optin = (
             (1 if args.naptr else 0)
@@ -1911,7 +1983,7 @@ def _run(argv: list[str] | None = None) -> int:
             + (1 if args.ipseckey else 0)
         )
         if view.show_security:
-            workers = 8 + len(selectors) + len(srv_specs) + extra_optin
+            workers = 8 + len(selectors) + len(localparts) + len(srv_specs) + extra_optin
             with ThreadPoolExecutor(max_workers=min(8, max(8, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
@@ -1953,6 +2025,10 @@ def _run(argv: list[str] | None = None) -> int:
                     if args.ipseckey
                     else None
                 )
+                fut_smimea = [
+                    pool.submit(resolver.inspect_smimea, domain, part)
+                    for part in localparts
+                ]
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
                 mta_sts = fut_mtasts.result()
@@ -1983,6 +2059,8 @@ def _run(argv: list[str] | None = None) -> int:
                     dname_observation = fut_dname.result()
                 if fut_ipseckey is not None:
                     ipseckey_observation = fut_ipseckey.result()
+                if localparts:
+                    smimea_observations = tuple(item.result() for item in fut_smimea)
             spf = inspect_spf(lookup.txt, lookup.errors)
             spf = resolver.expand_spf(spf)
             security = SecurityAnalyzer().analyze(
@@ -2007,14 +2085,23 @@ def _run(argv: list[str] | None = None) -> int:
                 uri=uri_observation,
                 dname=dname_observation,
                 ipseckey=ipseckey_observation,
+                smimea=smimea_observations or (),
                 cds=cds,
                 nsec=nsec,
                 csync=csync,
                 zonemd=zonemd,
                 rrsig=rrsig,
             )
-        elif selectors or srv_specs or args.naptr or args.uri or args.dname or args.ipseckey:
-            extra = len(selectors) + len(srv_specs) + extra_optin
+        elif (
+            selectors
+            or localparts
+            or srv_specs
+            or args.naptr
+            or args.uri
+            or args.dname
+            or args.ipseckey
+        ):
+            extra = len(selectors) + len(localparts) + len(srv_specs) + extra_optin
             if extra >= 2:
                 with ThreadPoolExecutor(max_workers=min(8, extra)) as pool:
                     fut_dkim = [
@@ -2039,6 +2126,10 @@ def _run(argv: list[str] | None = None) -> int:
                         if args.ipseckey
                         else None
                     )
+                    fut_smimea = [
+                        pool.submit(resolver.inspect_smimea, domain, part)
+                        for part in localparts
+                    ]
                     if selectors:
                         dkim_observations = tuple(item.result() for item in fut_dkim)
                     if srv_specs:
@@ -2051,6 +2142,8 @@ def _run(argv: list[str] | None = None) -> int:
                         dname_observation = fut_dname.result()
                     if fut_ipseckey is not None:
                         ipseckey_observation = fut_ipseckey.result()
+                    if localparts:
+                        smimea_observations = tuple(item.result() for item in fut_smimea)
             else:
                 if selectors:
                     dkim_observations = tuple(
@@ -2068,6 +2161,10 @@ def _run(argv: list[str] | None = None) -> int:
                     dname_observation = resolver.inspect_dname(domain)
                 if args.ipseckey:
                     ipseckey_observation = resolver.inspect_ipseckey(domain)
+                if localparts:
+                    smimea_observations = tuple(
+                        resolver.inspect_smimea(domain, part) for part in localparts
+                    )
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
         _print_dns_failure(exc, domain)
@@ -2123,6 +2220,7 @@ def _run(argv: list[str] | None = None) -> int:
         uri=uri_observation,
         dname=dname_observation,
         ipseckey=ipseckey_observation,
+        smimea=smimea_observations,
         security=security,
         view_record_types=_view_record_types(view),
         view_security=view.show_security,
@@ -2169,6 +2267,7 @@ def _run(argv: list[str] | None = None) -> int:
             uri_observation,
             dname_observation,
             ipseckey_observation,
+            smimea_observations,
         )
         if comparison is not None:
             _print_comparison(comparison)

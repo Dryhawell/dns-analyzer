@@ -42,6 +42,7 @@ from analyzer.naptr import NaptrObservation, NaptrRewrite
 from analyzer.uri import UriObservation, UriTarget
 from analyzer.dname import DnameObservation, DnameTarget
 from analyzer.ipseckey import IpseckeyObservation, IpseckeyRecord
+from analyzer.smimea import SmimeaObservation, SmimeaAssociation
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.version import __version__
 
@@ -102,6 +103,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "uri": _uri_dict(result.uri) if result.uri is not None else None,
         "dname": _dname_dict(result.dname) if result.dname is not None else None,
         "ipseckey": _ipseckey_dict(result.ipseckey) if result.ipseckey is not None else None,
+        "smimea": [_smimea_dict(item) for item in result.smimea] if result.smimea is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -750,6 +752,30 @@ def _ipseckey_dict(observation: IpseckeyObservation) -> dict[str, object]:
     }
 
 
+def _smimea_dict(observation: SmimeaObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "local_part": observation.local_part,
+        "query_name": observation.query_name,
+        "associations": [_smimea_association_dict(item) for item in observation.associations],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _smimea_association_dict(item: SmimeaAssociation) -> dict[str, object]:
+    return {
+        "usage": item.usage,
+        "selector": item.selector,
+        "matching_type": item.matching_type,
+        "association_length": item.association_length,
+        "usage_meaning": item.usage_meaning,
+        "selector_meaning": item.selector_meaning,
+        "matching_meaning": item.matching_meaning,
+    }
+
+
 def _ipseckey_record_dict(item: IpseckeyRecord) -> dict[str, object]:
     return {
         "precedence": item.precedence,
@@ -901,6 +927,9 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_dname(result.dname))
     if result.ipseckey is not None:
         parts.extend(_html_ipseckey(result.ipseckey))
+    if result.smimea:
+        for item in result.smimea:
+            parts.extend(_html_smimea(item))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -1707,6 +1736,45 @@ def _html_ipseckey(observation: IpseckeyObservation) -> list[str]:
     if observation.truncated:
         parts.append(
             '<p class="note">more than 8 IPSECKEY records; extras were not listed.</p>'
+        )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_smimea(observation: SmimeaObservation) -> list[str]:
+    parts = [
+        "<h2>SMIMEA</h2>",
+        f"<p>Local-part: <code>{_e(observation.local_part)}</code></p>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No SMIMEA records for this local-part.</p>")
+    if observation.associations:
+        parts.extend(
+            [
+                "<table>",
+                "<thead><tr><th>Usage</th><th>Selector</th>"
+                "<th>Matching</th><th>Association length</th>"
+                "</tr></thead>",
+                "<tbody>",
+            ]
+        )
+        for item in observation.associations:
+            parts.append(
+                "<tr>"
+                f"<td>{item.usage} {_e(item.usage_meaning)}</td>"
+                f"<td>{item.selector} {_e(item.selector_meaning)}</td>"
+                f"<td>{item.matching_type} {_e(item.matching_meaning)}</td>"
+                f"<td>{item.association_length}</td>"
+                "</tr>"
+            )
+        parts.extend(["</tbody>", "</table>"])
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 SMIMEA records; extras were not listed.</p>'
         )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

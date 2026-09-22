@@ -23,6 +23,7 @@ from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
 from analyzer.ipseckey import IpseckeyObservation
+from analyzer.smimea import SmimeaObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -70,7 +71,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/IPSECKEY/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/IPSECKEY/SMIMEA/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
 
     def analyze(
         self,
@@ -95,6 +96,7 @@ class SecurityAnalyzer:
         uri: UriObservation | None = None,
         dname: DnameObservation | None = None,
         ipseckey: IpseckeyObservation | None = None,
+        smimea: Sequence[SmimeaObservation] = (),
         cds: CdsObservation | None = None,
         nsec: NsecObservation | None = None,
         csync: CsyncObservation | None = None,
@@ -115,6 +117,7 @@ class SecurityAnalyzer:
             findings.extend(self._dname(dname))
         if ipseckey is not None:
             findings.extend(self._ipseckey(ipseckey))
+        findings.extend(self._smimea(smimea))
         if cds is not None:
             findings.extend(self._cds(cds))
         if nsec is not None:
@@ -618,6 +621,46 @@ class SecurityAnalyzer:
                 )
             ]
         return []
+
+    def _smimea(self, observations: Sequence[SmimeaObservation]) -> list[SecurityFinding]:
+        findings: list[SecurityFinding] = []
+        for item in observations:
+            if item.error:
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"SMIMEA for {item.local_part} could not be read",
+                        description=(
+                            f"{item.error} A timeout is not the same as a missing "
+                            "SMIMEA record, and it is not a compromise."
+                        ),
+                        recommendation=(
+                            "Retry the lookup before treating this local-part as "
+                            "unpublished. This tool does not guess mailbox names."
+                        ),
+                        code="smimea_unreadable",
+                    )
+                )
+                continue
+            if item.status == "NOT DETECTED":
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"SMIMEA for {item.local_part} not published",
+                        description=(
+                            f"No SMIMEA record was found at {item.query_name}. "
+                            "Most mailboxes do not publish SMIMEA. This is not proof "
+                            "that S/MIME is unused or that the domain is compromised."
+                        ),
+                        recommendation=(
+                            "Use --smimea only for a local-part you already know. "
+                            "This tool does not guess mailboxes, does not send email, "
+                            "and does not fetch certificates."
+                        ),
+                        code="smimea_missing",
+                    )
+                )
+        return findings
 
     def _cds(self, observation: CdsObservation) -> list[SecurityFinding]:
         if observation.error and observation.status != "FOUND":

@@ -75,6 +75,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["uri"] is None
     assert payload["dname"] is None
     assert payload["ipseckey"] is None
+    assert payload["smimea"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -469,6 +470,38 @@ def test_json_and_html_include_ipseckey() -> None:
                         60,
                     )
                 ],
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_smimea() -> None:
+    from analyzer.smimea import evaluate_smimea, smimea_query_name
+
+    qname = smimea_query_name("example.com", "alice")
+    observation = evaluate_smimea(
+        qname,
+        "alice",
+        [DNSRecord("SMIMEA", qname, "3 1 1 assoc-length=32", 300)],
+    )
+    result = _result(smimea=(observation,))
+    payload = result_to_dict(result)
+    assert payload["smimea"][0]["status"] == "FOUND"
+    assert payload["smimea"][0]["local_part"] == "alice"
+    assert payload["smimea"][0]["associations"][0]["association_length"] == 32
+    page = dumps_html(result)
+    assert "alice" in page
+    assert "SMIMEA" in page
+    xss = dumps_html(
+        _result(
+            smimea=(
+                evaluate_smimea(
+                    qname,
+                    "<script>alert(1)</script>",
+                    [DNSRecord("SMIMEA", qname, "3 1 1 assoc-length=8", 60)],
+                ),
             )
         )
     )

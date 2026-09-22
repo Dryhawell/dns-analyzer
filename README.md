@@ -2,9 +2,9 @@
 
 Professional DNS analysis CLI: it reads how a name is published, interprets security-related DNS signals, and writes a report you can share or pipe to other tools.
 
-> **Current status:** **v1.26.0** — see [CHANGELOG.md](CHANGELOG.md).
+> **Current status:** **v1.27.0** — see [CHANGELOG.md](CHANGELOG.md).
 
-This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV, NAPTR, URI, DNAME, IPSECKEY, CDS, NSEC, CSYNC, ZONEMD, RRSIG) are observations, not automatic proof of compromise.
+This is **not** a vulnerability scanner. Missing records (DNSSEC, SPF, DMARC, CAA, SRV, NAPTR, URI, DNAME, IPSECKEY, SMIMEA, CDS, NSEC, CSYNC, ZONEMD, RRSIG) are observations, not automatic proof of compromise.
 
 ---
 
@@ -14,7 +14,7 @@ DNS Analyzer takes a domain (`example.com` or a URL) or an IP (`--reverse`) and:
 
 1. Validates and normalizes the input
 2. Queries selected DNS record types (A, AAAA, CNAME, MX, NS, TXT, SOA, CAA, HTTPS, SVCB, PTR)
-3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CDS/CDNSKEY, NSEC/NSEC3PARAM, CSYNC, ZONEMD, RRSIG, optional DKIM / SRV / NAPTR / URI / DNAME / IPSECKEY)
+3. Inspects security-related signals (DNSSEC, SPF, DMARC, CAA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CDS/CDNSKEY, NSEC/NSEC3PARAM, CSYNC, ZONEMD, RRSIG, optional DKIM / SRV / NAPTR / URI / DNAME / IPSECKEY / SMIMEA)
 4. Prints a readable CLI report and can export JSON, CSV, or HTML
 
 Three layers:
@@ -80,11 +80,12 @@ NXDOMAIN on **A** aborts a forward scan: if the name does not exist, later types
 - Optional URI lookup (`--uri`; the target is not fetched and prefixes are never guessed)
 - Optional DNAME lookup (`--dname`; CNAME is not synthesized and the subtree is not walked)
 - Optional IPSECKEY lookup (`--ipseckey`; IPsec is not probed and key material is not dumped)
+- Optional SMIMEA lookup (`--smimea`; local-parts are never guessed and certificates are not fetched)
 - Optional multi-resolver A/AAAA comparison from a JSON config (no hardcoded public DNS IPs)
 - File logging (`logs/dns-analyzer.log`; no secrets or rdata values)
 - Unit tests with mocks (no live nameservers)
 
-**Not in this release:** GUI, aggressive subdomain brute-force, WHOIS, geolocation, PDF reports, DKIM selector hunting, BIMI selector hunting, SRV service hunting, NAPTR/ENUM hunting, URI prefix hunting, DNAME/CNAME synthesis hunting, IPSECKEY/IPsec probing.
+**Not in this release:** GUI, aggressive subdomain brute-force, WHOIS, geolocation, PDF reports, DKIM selector hunting, BIMI selector hunting, SRV service hunting, NAPTR/ENUM hunting, URI prefix hunting, DNAME/CNAME synthesis hunting, IPSECKEY/IPsec probing, SMIMEA mailbox hunting.
 
 ---
 
@@ -122,6 +123,7 @@ It does **not** assign CVEs, does **not** prove a domain is compromised, and doe
 | **URI** | Published URI — priority, weight, target (RFC 7553) | Opt-in via `--uri`; the target is not fetched. Missing is not a compromise |
 | **DNAME** | Subtree redirect — target suffix (RFC 6672) | Opt-in via `--dname`; CNAME is not synthesized. Missing is not a compromise |
 | **IPSECKEY** | IPsec gateway + public key — precedence, gateway type, algorithm, key length (RFC 4025) | Opt-in via `--ipseckey`; IPsec is not probed. Missing is not a compromise |
+| **SMIMEA** | DANE for S/MIME — usage, selector, matching, association length (RFC 8162) | Opt-in via `--smimea`; local-parts are never guessed. Missing is not a compromise |
 | **CDS** | Child DS candidate — algorithm, digest type (RFC 7344) | Listed with default / `--security`. Missing is common, not broken DNSSEC |
 | **CDNSKEY** | Child DNSKEY candidate for parent DS (RFC 7344) | Listed with default / `--security`. The parent is not contacted |
 | **NSEC** | Next owner name + types at this name (RFC 4034) | Listed with default / `--security`. The next name is not queried |
@@ -185,6 +187,7 @@ python main.py example.com --naptr
 python main.py example.com --uri
 python main.py example.com --dname
 python main.py example.com --ipseckey
+python main.py example.com --smimea alice
 python main.py https://example.com/login
 python main.py example.com --timeout 3
 python main.py example.com --format json
@@ -208,6 +211,7 @@ python main.py --version
 | `--uri` | URI at this domain. The target is not fetched; prefixes such as `_http._tcp` are never guessed |
 | `--dname` | DNAME at this domain. CNAME is not synthesized; the subtree is not walked |
 | `--ipseckey` | IPSECKEY at this domain. IPsec is not probed; key material is not dumped; a gateway name is not resolved |
+| `--smimea LOCALPART` | SMIMEA at `hash._smimecert.<domain>`. Repeatable (max 8). Never guessed. Certificates are not fetched |
 | `--record A --security` | That type plus the security sections |
 | `--reverse IP` | PTR only |
 | `--format json` / `csv` / `html` | Machine or HTML stdout (no human dump) |
@@ -215,7 +219,7 @@ python main.py --version
 | `--config PATH` | Named recursive resolvers from JSON. Two or more compare **A/AAAA** |
 | `--resolver NAME` | Pick names from `--config` (repeatable). First is the primary scan |
 | `--nameserver IP` | Use this recursive resolver instead of the OS list (repeatable). Not combined with `--config` |
-| `--version` | Print `dns-analyzer 1.26.0` and exit |
+| `--version` | Print `dns-analyzer 1.27.0` and exit |
 
 `--timeout` must be between 0 (exclusive) and 120 seconds. Default is 5. Each nameserver waits that long; **lifetime** is timeout × (up to 4 nameservers) so a dead first recursive server can fail over.
 
@@ -227,7 +231,7 @@ python main.py --version
 
 The program does not print a traceback for expected DNS or CLI errors. Unexpected failures log a traceback to the log file and print one line on stderr.
 
-Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, **CAA**, **HTTPS**, and **SVCB**. **SRV** is opt-in (`--srv`) and is not queried at the apex. **NAPTR** is opt-in (`--naptr`) and is not part of the default scan. **URI** is opt-in (`--uri`) and is not part of the default scan. **DNAME** is opt-in (`--dname`) and is not part of the default scan. **IPSECKEY** is opt-in (`--ipseckey`) and is not part of the default scan. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
+Forward lookup can show **A**, **AAAA**, **CNAME**, **MX**, **NS**, **TXT**, **SOA**, **CAA**, **HTTPS**, and **SVCB**. **SRV** is opt-in (`--srv`) and is not queried at the apex. **NAPTR** is opt-in (`--naptr`) and is not part of the default scan. **URI** is opt-in (`--uri`) and is not part of the default scan. **DNAME** is opt-in (`--dname`) and is not part of the default scan. **IPSECKEY** is opt-in (`--ipseckey`) and is not part of the default scan. **SMIMEA** is opt-in (`--smimea`) and is not part of the default scan. `--reverse` maps an IP to a hostname via **PTR**. Missing PTR is common and is not a vulnerability.
 
 `--record A` **queries only A**. `--record MX` still queries **A first** (existence); JSON/CSV therefore include that A plus MX — collected data, not a hidden full-zone dump.
 
@@ -304,6 +308,12 @@ IPSECKEY at this name (precedence, gateway, key length; IPsec is not probed):
 python main.py example.com --ipseckey
 ```
 
+SMIMEA for one local-part (never guessed; certificates are not fetched):
+
+```bash
+python main.py example.com --smimea alice
+```
+
 JSON on stdout (pipe-friendly; no “DNS ANALYZER” banner):
 
 ```bash
@@ -351,7 +361,7 @@ JSON and CSV are for other programs, not for humans scraping the terminal. HTML 
 
 HTML uses inline CSS only: no JavaScript, no CDN. Record values are escaped (`&lt;script&gt;`) so a TXT string cannot inject markup.
 
-JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `cds` (CDS/CDNSKEY when security view is on), `nsec` (NSEC/NSEC3PARAM when security view is on), `csync` (when security view is on), `zonemd` (when security view is on), `rrsig` (when security view is on), `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi`, `tlsa`, `sshfp`, `fcrdns`, `mx_hosts`, `ns_hosts`, `cname_targets` and `soa_ns` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `naptr` (only when `--naptr` is used), `uri` (only when `--uri` is used), `dname` (only when `--dname` is used), `ipseckey` (only when `--ipseckey` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
+JSON includes `schema` (`dns-analyzer.report.v1`), `tool_version`, `target`, `scan_time` (UTC ISO 8601), `duration_ms`, `records`, `errors`, `dnssec`, `cds` (CDS/CDNSKEY when security view is on), `nsec` (NSEC/NSEC3PARAM when security view is on), `csync` (when security view is on), `zonemd` (when security view is on), `rrsig` (when security view is on), `spf`, `dmarc`, `mta_sts`, `tls_rpt`, `bimi`, `tlsa`, `sshfp`, `fcrdns`, `mx_hosts`, `ns_hosts`, `cname_targets` and `soa_ns` (when security view is on), `dkim` (only when `--dkim` is used), `srv` (only when `--srv` is used), `naptr` (only when `--naptr` is used), `uri` (only when `--uri` is used), `dname` (only when `--dname` is used), `ipseckey` (only when `--ipseckey` is used), `smimea` (only when `--smimea` is used), `security_analysis` (findings), and `risk_score` (with contributions). `--config` with two or more resolvers adds `resolver_comparison`.
 
 `scan_time` is UTC. `duration_ms` covers DNS queries for that run, including extra resolvers when comparison is on, not JSON encoding. The risk object is the same heuristic as the CLI, not CVSS.
 
@@ -543,6 +553,18 @@ python main.py example.com --ipseckey
 
 ---
 
+## SMIMEA
+
+**SMIMEA** (RFC 8162) publishes a **DANE certificate association for S/MIME**, not TLSA for HTTPS. The owner name is `{leftmost 28 octets of SHA-256(prepared local-part), hex}._smimecert.<domain>`. This tool looks up local-parts only when you pass `--smimea LOCALPART`. It does **not** brute-force `alice`, `admin`, `info`, or any other mailbox list. It does **not** send email, does **not** fetch certificates, and does **not** probe SMTP, IMAP, or TLS.
+
+```bash
+python main.py example.com --smimea alice
+```
+
+The local-part is the part before `@`. If you pass `alice@example.com`, only `alice` is used. ASCII letters are lowercased; the prepared string is UTF-8 encoded, then SHA-256; the leftmost 28 octets become the DNS label (RFC 8162 §3). `--record SMIMEA` is rejected; use `--smimea`. Default / `--security` / `--all` do not query SMIMEA unless you pass `--smimea`. `FOUND` lists usage, selector, matching type, and **association length** (not a hex dump) for up to 8 records. NXDOMAIN / empty is **NOT DETECTED**. Timeout is unread, not “SMIMEA missing”. Listing a record is not certificate validation.
+
+---
+
 ## CAA
 
 **CAA** (Certification Authority Authorization, RFC 8659) says which CAs may issue certificates for the name.
@@ -609,7 +631,7 @@ dns-analyzer/
 python -m pytest -q
 ```
 
-Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, NAPTR, URI, DNAME, IPSECKEY, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA formatting and issue/issuewild/iodef listing, DNSSEC evaluation and DNSKEY/DS algorithm listing, CDS/CDNSKEY listing, NSEC/NSEC3PARAM listing, CSYNC listing, ZONEMD listing, RRSIG listing, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
+Tests do **not** contact real nameservers. `dnspython` is mocked. Validator, TTL, SPF, DMARC, DKIM, SRV, NAPTR, URI, DNAME, IPSECKEY, SMIMEA, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, MX hosts, NS hosts, CNAME targets, SOA/NS, CAA formatting and issue/issuewild/iodef listing, DNSSEC evaluation and DNSKEY/DS algorithm listing, CDS/CDNSKEY listing, NSEC/NSEC3PARAM listing, CSYNC listing, ZONEMD listing, RRSIG listing, risk weights, JSON/CSV/HTML, CLI flags, logging, config loading, and resolver comparison are all local.
 
 If a test needs the network, it does not belong in this suite.
 
@@ -633,6 +655,7 @@ If a test needs the network, it does not belong in this suite.
 - URI is **opt-in** (`--uri`); the target is not fetched and prefixes such as `_http._tcp` are never guessed
 - DNAME is **opt-in** (`--dname`); CNAME is not synthesized and the subtree is not walked; HTTP is not fetched
 - IPSECKEY is **opt-in** (`--ipseckey`); IPsec is not probed; key bytes are not dumped; a gateway name is not resolved
+- SMIMEA is **opt-in** (`--smimea`); local-parts are never guessed; certificates are not fetched; association bytes are not dumped; listing is not S/MIME validation
 - MTA-STS is DNS-only (`_mta-sts` TXT); the HTTPS policy file is not fetched
 - TLS-RPT is DNS-only (`_smtp._tls` TXT); SMTP is not probed and HTTPS rua URLs are not fetched
 - BIMI is DNS-only (`default._bimi` TXT); only the default selector is queried; logo and VMC URLs are not fetched
@@ -660,7 +683,7 @@ Only analyze domains you own or have permission to test. Public recursive lookup
 
 ## Roadmap
 
-**v1.26.0** lists IPSECKEY with opt-in `--ipseckey`. IPsec is not probed and key material is not dumped. History: [CHANGELOG.md](CHANGELOG.md).
+**v1.27.0** lists SMIMEA with opt-in `--smimea`. Local-parts are never guessed and certificates are not fetched. History: [CHANGELOG.md](CHANGELOG.md).
 
 Possible later work (not scheduled): GUI on the same `analyzer/` types, authorized subdomain discovery, WHOIS, PDF. Enumeration, if added, stays opt-in and for domains you are allowed to test.
 
