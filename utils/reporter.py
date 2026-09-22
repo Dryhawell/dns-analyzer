@@ -43,6 +43,7 @@ from analyzer.uri import UriObservation, UriTarget
 from analyzer.dname import DnameObservation, DnameTarget
 from analyzer.ipseckey import IpseckeyObservation, IpseckeyRecord
 from analyzer.smimea import SmimeaObservation, SmimeaAssociation
+from analyzer.openpgpkey import OpenpgpkeyObservation, OpenpgpkeyRecord
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.version import __version__
 
@@ -104,6 +105,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "dname": _dname_dict(result.dname) if result.dname is not None else None,
         "ipseckey": _ipseckey_dict(result.ipseckey) if result.ipseckey is not None else None,
         "smimea": [_smimea_dict(item) for item in result.smimea] if result.smimea is not None else None,
+        "openpgpkey": [_openpgpkey_dict(item) for item in result.openpgpkey] if result.openpgpkey is not None else None,
         "security_analysis": _security_dict(result.security),
         "risk_score": _risk_dict(result.security.risk) if result.security else None,
     }
@@ -764,6 +766,22 @@ def _smimea_dict(observation: SmimeaObservation) -> dict[str, object]:
     }
 
 
+def _openpgpkey_dict(observation: OpenpgpkeyObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "local_part": observation.local_part,
+        "query_name": observation.query_name,
+        "keys": [_openpgpkey_record_dict(item) for item in observation.keys],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
+def _openpgpkey_record_dict(item: OpenpgpkeyRecord) -> dict[str, object]:
+    return {"key_length": item.key_length}
+
+
 def _smimea_association_dict(item: SmimeaAssociation) -> dict[str, object]:
     return {
         "usage": item.usage,
@@ -930,6 +948,9 @@ def _html_document(result: DNSAnalysisResult) -> str:
     if result.smimea:
         for item in result.smimea:
             parts.extend(_html_smimea(item))
+    if result.openpgpkey:
+        for item in result.openpgpkey:
+            parts.extend(_html_openpgpkey(item))
     if result.security is not None:
         parts.extend(_html_security(result.security))
     if result.comparison is not None:
@@ -1775,6 +1796,36 @@ def _html_smimea(observation: SmimeaObservation) -> list[str]:
     if observation.truncated:
         parts.append(
             '<p class="note">more than 8 SMIMEA records; extras were not listed.</p>'
+        )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_openpgpkey(observation: OpenpgpkeyObservation) -> list[str]:
+    parts = [
+        "<h2>OPENPGPKEY</h2>",
+        f"<p>Local-part: <code>{_e(observation.local_part)}</code></p>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No OPENPGPKEY records for this local-part.</p>")
+    if observation.keys:
+        parts.extend(
+            [
+                "<table>",
+                "<thead><tr><th>Key length</th></tr></thead>",
+                "<tbody>",
+            ]
+        )
+        for item in observation.keys:
+            parts.append(f"<tr><td>{item.key_length}</td></tr>")
+        parts.extend(["</tbody>", "</table>"])
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 OPENPGPKEY records; extras were not listed.</p>'
         )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")

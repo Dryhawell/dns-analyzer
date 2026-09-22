@@ -92,6 +92,11 @@ from analyzer.uri import UriObservation, evaluate_uri
 from analyzer.dname import DnameObservation, evaluate_dname
 from analyzer.ipseckey import IpseckeyObservation, evaluate_ipseckey
 from analyzer.smimea import SmimeaObservation, evaluate_smimea, smimea_query_name
+from analyzer.openpgpkey import (
+    OpenpgpkeyObservation,
+    evaluate_openpgpkey,
+    openpgpkey_query_name,
+)
 from analyzer.sshfp import SshfpObservation, evaluate_sshfp
 from analyzer.tlsa import TlsaObservation, evaluate_tlsa, tlsa_query_name
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt, tls_rpt_query_name
@@ -781,6 +786,20 @@ class DNSResolver:
 
     def resolve_smimea(self, name: str) -> list[DNSRecord]:
         return self._query(name, "SMIMEA")
+
+    def inspect_openpgpkey(self, name: str, local_part: str) -> OpenpgpkeyObservation:
+        """OPENPGPKEY lookup at hash._openpgpkey.<name>. Does not dump the key."""
+        qname = openpgpkey_query_name(name, local_part)
+        try:
+            records = self.resolve_openpgpkey(qname)
+        except DomainNotFoundError:
+            return evaluate_openpgpkey(qname, local_part, ())
+        except DNSQueryError as exc:
+            return evaluate_openpgpkey(qname, local_part, (), error=str(exc))
+        return evaluate_openpgpkey(qname, local_part, records)
+
+    def resolve_openpgpkey(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "OPENPGPKEY")
 
     def expand_spf(self, observation: SpfObservation) -> SpfObservation:
         """Look up include:/redirect= one hop. Nested include: is listed, not queried."""

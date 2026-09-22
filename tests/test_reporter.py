@@ -76,6 +76,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["dname"] is None
     assert payload["ipseckey"] is None
     assert payload["smimea"] is None
+    assert payload["openpgpkey"] is None
     assert payload["security_analysis"] is None
     assert payload["risk_score"] is None
 
@@ -501,6 +502,38 @@ def test_json_and_html_include_smimea() -> None:
                     qname,
                     "<script>alert(1)</script>",
                     [DNSRecord("SMIMEA", qname, "3 1 1 assoc-length=8", 60)],
+                ),
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_openpgpkey() -> None:
+    from analyzer.openpgpkey import evaluate_openpgpkey, openpgpkey_query_name
+
+    qname = openpgpkey_query_name("example.com", "alice")
+    observation = evaluate_openpgpkey(
+        qname,
+        "alice",
+        [DNSRecord("OPENPGPKEY", qname, "key-length=64", 300)],
+    )
+    result = _result(openpgpkey=(observation,))
+    payload = result_to_dict(result)
+    assert payload["openpgpkey"][0]["status"] == "FOUND"
+    assert payload["openpgpkey"][0]["local_part"] == "alice"
+    assert payload["openpgpkey"][0]["keys"][0]["key_length"] == 64
+    page = dumps_html(result)
+    assert "alice" in page
+    assert "OPENPGPKEY" in page
+    xss = dumps_html(
+        _result(
+            openpgpkey=(
+                evaluate_openpgpkey(
+                    qname,
+                    "<script>alert(1)</script>",
+                    [DNSRecord("OPENPGPKEY", qname, "key-length=8", 60)],
                 ),
             )
         )

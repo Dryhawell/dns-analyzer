@@ -314,6 +314,21 @@ def test_smimea_value_lists_length_without_association_bytes() -> None:
     assert "not dumped" in details["Note"].lower()
 
 
+def test_openpgpkey_value_lists_length_without_key_bytes() -> None:
+    rdata = DummyRdata(
+        "unused",
+        key=b"\xab" * 64,
+    )
+    value = format_rdata("OPENPGPKEY", rdata)
+    assert value == "key-length=64"
+    assert "abab" not in value.lower()
+    row = records_from_answer("OPENPGPKEY", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    details = dict(row.details)
+    assert details["Key length"] == "64"
+    assert "not dumped" in details["Note"].lower()
+    assert "not smimea" in details["Note"].lower()
+
+
 def test_rrsig_value_lists_fields_without_signature_bytes() -> None:
     rdata = DummyRdata(
         "unused",

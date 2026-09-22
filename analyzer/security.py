@@ -24,6 +24,7 @@ from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
 from analyzer.ipseckey import IpseckeyObservation
 from analyzer.smimea import SmimeaObservation
+from analyzer.openpgpkey import OpenpgpkeyObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -71,7 +72,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/IPSECKEY/SMIMEA/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/IPSECKEY/SMIMEA/OPENPGPKEY/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
 
     def analyze(
         self,
@@ -97,6 +98,7 @@ class SecurityAnalyzer:
         dname: DnameObservation | None = None,
         ipseckey: IpseckeyObservation | None = None,
         smimea: Sequence[SmimeaObservation] = (),
+        openpgpkey: Sequence[OpenpgpkeyObservation] = (),
         cds: CdsObservation | None = None,
         nsec: NsecObservation | None = None,
         csync: CsyncObservation | None = None,
@@ -118,6 +120,7 @@ class SecurityAnalyzer:
         if ipseckey is not None:
             findings.extend(self._ipseckey(ipseckey))
         findings.extend(self._smimea(smimea))
+        findings.extend(self._openpgpkey(openpgpkey))
         if cds is not None:
             findings.extend(self._cds(cds))
         if nsec is not None:
@@ -658,6 +661,49 @@ class SecurityAnalyzer:
                             "and does not fetch certificates."
                         ),
                         code="smimea_missing",
+                    )
+                )
+        return findings
+
+    def _openpgpkey(
+        self, observations: Sequence[OpenpgpkeyObservation]
+    ) -> list[SecurityFinding]:
+        findings: list[SecurityFinding] = []
+        for item in observations:
+            if item.error:
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"OPENPGPKEY for {item.local_part} could not be read",
+                        description=(
+                            f"{item.error} A timeout is not the same as a missing "
+                            "OPENPGPKEY record, and it is not a compromise."
+                        ),
+                        recommendation=(
+                            "Retry the lookup before treating this local-part as "
+                            "unpublished. This tool does not guess mailbox names."
+                        ),
+                        code="openpgpkey_unreadable",
+                    )
+                )
+                continue
+            if item.status == "NOT DETECTED":
+                findings.append(
+                    SecurityFinding(
+                        severity="info",
+                        title=f"OPENPGPKEY for {item.local_part} not published",
+                        description=(
+                            f"No OPENPGPKEY record was found at {item.query_name}. "
+                            "Most mailboxes do not publish OPENPGPKEY. This is not "
+                            "proof that OpenPGP is unused or that the domain is "
+                            "compromised."
+                        ),
+                        recommendation=(
+                            "Use --openpgpkey only for a local-part you already "
+                            "know. This tool does not guess mailboxes, does not "
+                            "contact a keyserver, and does not dump key bytes."
+                        ),
+                        code="openpgpkey_missing",
                     )
                 )
         return findings

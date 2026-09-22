@@ -23,6 +23,7 @@ from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
 from analyzer.ipseckey import IpseckeyObservation
 from analyzer.smimea import SmimeaObservation
+from analyzer.openpgpkey import OpenpgpkeyObservation
 from analyzer.fcrdns import FcrdnsObservation
 from analyzer.mx import MxHostObservation
 from analyzer.ns import NsHostObservation
@@ -75,6 +76,7 @@ class DNSAnalysisResult:
     dname: DnameObservation | None = None
     ipseckey: IpseckeyObservation | None = None
     smimea: tuple[SmimeaObservation, ...] | None = None
+    openpgpkey: tuple[OpenpgpkeyObservation, ...] | None = None
     security: SecurityReport | None = None
     ptr_query: str | None = None
     view_record_types: tuple[str, ...] | None = None

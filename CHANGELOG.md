@@ -2,6 +2,26 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.28.0 — 2026-09-22
+
+OPENPGPKEY listing. OpenPGP keys in DNS are listed; key bytes are not dumped.
+
+### Added
+
+- Opt-in `--openpgpkey LOCALPART` lists up to 8 OPENPGPKEY records per local-part (key length only)
+- CLI/JSON/HTML include `openpgpkey` only when `--openpgpkey` is used
+- Findings: `openpgpkey_missing` / `openpgpkey_unreadable` are info (+0)
+- `--record OPENPGPKEY` is rejected with a hint to use `--openpgpkey`
+
+### Notes
+
+- Missing OPENPGPKEY is common and is not a compromise
+- Local-parts are never guessed; pass the mailbox local-part (the part before @)
+- This tool does not send email, contact a keyserver, or invoke GnuPG
+- Key bytes are not dumped; only key length is listed
+- Listing an OPENPGPKEY record is not proof that this mailbox uses working OpenPGP
+- OPENPGPKEY is OpenPGP in DNS (RFC 7929), not SMIMEA
+
 ## 1.27.0 — 2026-09-22
 
 SMIMEA listing. DANE for S/MIME is listed; certificates are not fetched.

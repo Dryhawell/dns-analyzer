@@ -36,6 +36,11 @@ from analyzer.smimea import (
     SmimeaLocalpartError,
     normalize_localparts,
 )
+from analyzer.openpgpkey import (
+    OpenpgpkeyObservation,
+    OpenpgpkeyLocalpartError,
+    normalize_localparts as normalize_openpgpkey_localparts,
+)
 from analyzer.dnssec import DnssecObservation
 from analyzer.exceptions import (
     DNSNetworkError,
@@ -107,6 +112,7 @@ Examples:
   python main.py example.com --dname
   python main.py example.com --ipseckey
   python main.py example.com --smimea alice
+  python main.py example.com --openpgpkey alice
   python main.py example.com --format json
   python main.py example.com --format html --output reports/example_com.html
   python main.py example.com --output reports/example_com.json
@@ -123,10 +129,11 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 --dname is opt-in; CNAME is not synthesized and the subtree is not walked.
 --ipseckey is opt-in; IPsec is not probed and key material is not dumped.
 --smimea LOCALPART is opt-in; local-parts are never guessed; missing SMIMEA is an observation.
+--openpgpkey LOCALPART is opt-in; local-parts are never guessed; missing OPENPGPKEY is an observation.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, DNAME, IPSECKEY, or SMIMEA is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG / missing IPSECKEY / missing SMIMEA are also observations, not hijacking.
+MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, DNAME, IPSECKEY, SMIMEA, or OPENPGPKEY is an observation, not proof of compromise.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG / missing IPSECKEY / missing SMIMEA / missing OPENPGPKEY are also observations, not hijacking.
 """
 
 
@@ -199,6 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
             "DNAME is --dname, not --record DNAME. "
             "IPSECKEY is --ipseckey, not --record IPSECKEY. "
             "SMIMEA is --smimea, not --record SMIMEA. "
+            "OPENPGPKEY is --openpgpkey, not --record OPENPGPKEY. "
             "TLSA is DANE at _443._tcp, not --record TLSA. "
             "SSHFP is in the security view, not --record SSHFP. "
             "CDS/CDNSKEY are in the security view, not --record CDS. "
@@ -281,6 +289,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--openpgpkey",
+        action="append",
+        dest="openpgpkey_localparts",
+        metavar="LOCALPART",
+        help=(
+            "Look up OPENPGPKEY for this mailbox local-part "
+            "(hash._openpgpkey.<domain>, RFC 7929). Repeatable, max 8. "
+            "Local-parts are never guessed. Key bytes are not dumped."
+        ),
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         help="Show every record type plus security analysis (default)",
@@ -340,7 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "IPSECKEY", "SMIMEA", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "IPSECKEY", "SMIMEA", "OPENPGPKEY", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -378,6 +397,12 @@ def _record_type_error(raw: str) -> str:
         return (
             "SMIMEA is opt-in. Use --smimea <local-part>. Local-parts are never "
             "guessed. This tool does not send email or fetch certificates."
+        )
+    if kind == "OPENPGPKEY":
+        return (
+            "OPENPGPKEY is opt-in. Use --openpgpkey <local-part>. Local-parts "
+            "are never guessed. This tool does not dump key bytes or contact "
+            "a keyserver."
         )
     if kind == "TLSA":
         return (
@@ -451,9 +476,10 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
         or args.dname
         or args.ipseckey
         or args.smimea_localparts
+        or args.openpgpkey_localparts
     ):
         return (
-            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname/--ipseckey/--smimea) "
+            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname/--ipseckey/--smimea/--openpgpkey) "
             "or --reverse, not both."
         )
 
@@ -805,6 +831,7 @@ def _print_lookup(
     dname: DnameObservation | None = None,
     ipseckey: IpseckeyObservation | None = None,
     smimea: tuple[SmimeaObservation, ...] | None = None,
+    openpgpkey: tuple[OpenpgpkeyObservation, ...] | None = None,
 ) -> None:
     errors = lookup.errors
     types = view.record_types
@@ -861,6 +888,9 @@ def _print_lookup(
     if smimea:
         for item in smimea:
             _print_smimea(item)
+    if openpgpkey:
+        for item in openpgpkey:
+            _print_openpgpkey(item)
     if view.show_security:
         if (
             dnssec is None
@@ -1582,6 +1612,28 @@ def _print_smimea(observation: SmimeaObservation) -> None:
     print()
 
 
+def _print_openpgpkey(observation: OpenpgpkeyObservation) -> None:
+    print("OPENPGPKEY")
+    print("────────────────────────")
+    print(f"Local-part: {observation.local_part}")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No OPENPGPKEY records for this local-part.")
+    for item in observation.keys:
+        print(f"  key-length={item.key_length}")
+        print(f"Key length: {item.key_length}")
+        print()
+    if observation.truncated:
+        print("Note: more than 8 OPENPGPKEY records; extras were not listed.")
+        print()
+    if observation.error:
+        print(f"Note: {observation.error}")
+        print()
+    print(observation.note)
+    print()
+
+
 def _print_security(report: SecurityReport) -> None:
     print("SECURITY ANALYSIS")
     print("────────────────────────")
@@ -1779,6 +1831,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --dname")
     print("       python main.py <domain> --ipseckey")
     print("       python main.py <domain> --smimea alice")
+    print("       python main.py <domain> --openpgpkey alice")
     print("       python main.py <domain> --format json")
     print("       python main.py <domain> --format html --output reports/example.html")
     print("       python main.py <domain> --output reports/example.json")
@@ -1872,6 +1925,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.dname
             or args.ipseckey
             or args.smimea_localparts
+            or args.openpgpkey_localparts
         )
         if extra or args.export_format != "text":
             print("Error: Provide a domain, or use --reverse <ip>.", file=sys.stderr)
@@ -1916,6 +1970,18 @@ def _run(argv: list[str] | None = None) -> int:
     except SmimeaLocalpartError as exc:
         _configure_logging()
         _log.error("Invalid SMIMEA local-part")
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        openpgpkey_parts = (
+            normalize_openpgpkey_localparts(args.openpgpkey_localparts)
+            if args.openpgpkey_localparts
+            else ()
+        )
+    except OpenpgpkeyLocalpartError as exc:
+        _configure_logging()
+        _log.error("Invalid OPENPGPKEY local-part")
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
@@ -1975,6 +2041,7 @@ def _run(argv: list[str] | None = None) -> int:
     dname_observation = None
     ipseckey_observation = None
     smimea_observations = None
+    openpgpkey_observations = None
     try:
         extra_optin = (
             (1 if args.naptr else 0)
@@ -1983,7 +2050,14 @@ def _run(argv: list[str] | None = None) -> int:
             + (1 if args.ipseckey else 0)
         )
         if view.show_security:
-            workers = 8 + len(selectors) + len(localparts) + len(srv_specs) + extra_optin
+            workers = (
+                8
+                + len(selectors)
+                + len(localparts)
+                + len(openpgpkey_parts)
+                + len(srv_specs)
+                + extra_optin
+            )
             with ThreadPoolExecutor(max_workers=min(8, max(8, workers))) as pool:
                 fut_dnssec = pool.submit(resolver.inspect_dnssec, domain)
                 fut_dmarc = pool.submit(resolver.inspect_dmarc, domain)
@@ -2029,6 +2103,10 @@ def _run(argv: list[str] | None = None) -> int:
                     pool.submit(resolver.inspect_smimea, domain, part)
                     for part in localparts
                 ]
+                fut_openpgpkey = [
+                    pool.submit(resolver.inspect_openpgpkey, domain, part)
+                    for part in openpgpkey_parts
+                ]
                 dnssec = fut_dnssec.result()
                 dmarc = fut_dmarc.result()
                 mta_sts = fut_mtasts.result()
@@ -2061,6 +2139,10 @@ def _run(argv: list[str] | None = None) -> int:
                     ipseckey_observation = fut_ipseckey.result()
                 if localparts:
                     smimea_observations = tuple(item.result() for item in fut_smimea)
+                if openpgpkey_parts:
+                    openpgpkey_observations = tuple(
+                        item.result() for item in fut_openpgpkey
+                    )
             spf = inspect_spf(lookup.txt, lookup.errors)
             spf = resolver.expand_spf(spf)
             security = SecurityAnalyzer().analyze(
@@ -2086,6 +2168,7 @@ def _run(argv: list[str] | None = None) -> int:
                 dname=dname_observation,
                 ipseckey=ipseckey_observation,
                 smimea=smimea_observations or (),
+                openpgpkey=openpgpkey_observations or (),
                 cds=cds,
                 nsec=nsec,
                 csync=csync,
@@ -2095,13 +2178,20 @@ def _run(argv: list[str] | None = None) -> int:
         elif (
             selectors
             or localparts
+            or openpgpkey_parts
             or srv_specs
             or args.naptr
             or args.uri
             or args.dname
             or args.ipseckey
         ):
-            extra = len(selectors) + len(localparts) + len(srv_specs) + extra_optin
+            extra = (
+                len(selectors)
+                + len(localparts)
+                + len(openpgpkey_parts)
+                + len(srv_specs)
+                + extra_optin
+            )
             if extra >= 2:
                 with ThreadPoolExecutor(max_workers=min(8, extra)) as pool:
                     fut_dkim = [
@@ -2130,6 +2220,10 @@ def _run(argv: list[str] | None = None) -> int:
                         pool.submit(resolver.inspect_smimea, domain, part)
                         for part in localparts
                     ]
+                    fut_openpgpkey = [
+                        pool.submit(resolver.inspect_openpgpkey, domain, part)
+                        for part in openpgpkey_parts
+                    ]
                     if selectors:
                         dkim_observations = tuple(item.result() for item in fut_dkim)
                     if srv_specs:
@@ -2144,6 +2238,10 @@ def _run(argv: list[str] | None = None) -> int:
                         ipseckey_observation = fut_ipseckey.result()
                     if localparts:
                         smimea_observations = tuple(item.result() for item in fut_smimea)
+                    if openpgpkey_parts:
+                        openpgpkey_observations = tuple(
+                            item.result() for item in fut_openpgpkey
+                        )
             else:
                 if selectors:
                     dkim_observations = tuple(
@@ -2164,6 +2262,11 @@ def _run(argv: list[str] | None = None) -> int:
                 if localparts:
                     smimea_observations = tuple(
                         resolver.inspect_smimea(domain, part) for part in localparts
+                    )
+                if openpgpkey_parts:
+                    openpgpkey_observations = tuple(
+                        resolver.inspect_openpgpkey(domain, part)
+                        for part in openpgpkey_parts
                     )
     except DNSQueryError as exc:
         _log.error("DNS analysis failed target=%s reason=%s", domain, exc)
@@ -2221,6 +2324,7 @@ def _run(argv: list[str] | None = None) -> int:
         dname=dname_observation,
         ipseckey=ipseckey_observation,
         smimea=smimea_observations,
+        openpgpkey=openpgpkey_observations,
         security=security,
         view_record_types=_view_record_types(view),
         view_security=view.show_security,
@@ -2268,6 +2372,7 @@ def _run(argv: list[str] | None = None) -> int:
             dname_observation,
             ipseckey_observation,
             smimea_observations,
+            openpgpkey_observations,
         )
         if comparison is not None:
             _print_comparison(comparison)

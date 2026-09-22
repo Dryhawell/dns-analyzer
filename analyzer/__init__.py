@@ -44,6 +44,7 @@ from analyzer.uri import UriObservation, evaluate_uri
 from analyzer.dname import DnameObservation, evaluate_dname
 from analyzer.ipseckey import IpseckeyObservation, evaluate_ipseckey
 from analyzer.smimea import SmimeaObservation, evaluate_smimea
+from analyzer.openpgpkey import OpenpgpkeyObservation, evaluate_openpgpkey
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts
 from analyzer.tlsrpt import TlsRptObservation, evaluate_tls_rpt
 from analyzer.validator import DomainValidationError, is_valid_domain, normalize_domain
@@ -92,6 +93,8 @@ __all__ = [
     "evaluate_ipseckey",
     "SmimeaObservation",
     "evaluate_smimea",
+    "OpenpgpkeyObservation",
+    "evaluate_openpgpkey",
     "MtaStsObservation",
     "evaluate_mta_sts",
     "TlsRptObservation",

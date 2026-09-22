@@ -24,21 +24,21 @@ Canonicalization (RFC 8162 section 3, documented):
 
 from __future__ import annotations
 
-import hashlib
-import re
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from analyzer.localpart import (
+    HASH_OCTETS,
+    MAX_LOCALPARTS,
+    LocalpartError,
+    hash_localpart,
+    normalize_localparts as shared_normalize_localparts,
+    prepare_localpart as shared_prepare,
+)
 from analyzer.models import DNSRecord
 from analyzer.tlsa import matching_meaning, selector_meaning, usage_meaning
 
 MAX_SMIMEA = 8
-MAX_LOCALPARTS = 8
-HASH_OCTETS = 28
-_MAX_LOCALPART_OCTETS = 64
-
-_COMMENT = re.compile(r"\([^)]*\)")
 
 SMIMEA_NOTE = (
     "SMIMEA (RFC 8162) publishes a DANE certificate association for S/MIME "
@@ -72,51 +72,21 @@ class SmimeaObservation:
     error: str | None = None
 
 
-class SmimeaLocalpartError(ValueError):
+class SmimeaLocalpartError(LocalpartError):
     """Raised when a --smimea value cannot be used as a local-part."""
 
 
 def prepare_localpart(raw: str) -> str:
     """RFC 8162 §3 prepare, plus documented ASCII lowercase. No mailbox guessing."""
-    if not isinstance(raw, str):
-        raise SmimeaLocalpartError("SMIMEA local-part must be a string.")
-    value = raw.strip()
-    if "@" in value:
-        value = value.split("@", 1)[0].strip()
-    if not value:
-        raise SmimeaLocalpartError(
-            "SMIMEA local-part cannot be empty. Pass the part before @, "
-            "for example alice, not a guessed mailbox list."
-        )
-    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-        value = value[1:-1]
-    value = _COMMENT.sub("", value)
-    value = re.sub(r"\s*\.\s*", ".", value)
-    value = value.replace("\\", "")
-    value = value.strip()
-    if any(ord(char) > 127 for char in value):
-        value = unicodedata.normalize("NFC", value)
-    value = "".join(char.lower() if char.isascii() else char for char in value)
-    if not value:
-        raise SmimeaLocalpartError(
-            "SMIMEA local-part cannot be empty after RFC 8162 preparation."
-        )
-    encoded = value.encode("utf-8")
-    if len(encoded) > _MAX_LOCALPART_OCTETS:
-        raise SmimeaLocalpartError("SMIMEA local-part is too long.")
-    if any(ord(char) < 32 for char in value):
-        raise SmimeaLocalpartError(
-            f"Invalid SMIMEA local-part {raw!r}. Pass a mailbox local-part "
-            "(the part before @). Local-parts are never guessed."
-        )
-    return value
+    try:
+        return shared_prepare(raw, label="SMIMEA local-part")
+    except LocalpartError as exc:
+        raise SmimeaLocalpartError(str(exc)) from exc
 
 
 def localpart_hash(local_part: str) -> str:
     """Leftmost 28 octets of SHA-256(prepared local-part), lowercase hex."""
-    prepared = prepare_localpart(local_part)
-    digest = hashlib.sha256(prepared.encode("utf-8")).digest()
-    return digest[:HASH_OCTETS].hex()
+    return hash_localpart(prepare_localpart(local_part))
 
 
 def smimea_query_name(domain: str, local_part: str) -> str:
@@ -131,17 +101,12 @@ def normalize_localpart(raw: str) -> str:
 
 def normalize_localparts(raw: Sequence[str]) -> tuple[str, ...]:
     """Deduplicate local-parts, keep order, cap how many we query."""
-    seen: list[str] = []
-    for item in raw:
-        local_part = normalize_localpart(item)
-        if local_part not in seen:
-            seen.append(local_part)
-    if len(seen) > MAX_LOCALPARTS:
-        raise SmimeaLocalpartError(
-            f"Too many --smimea local-parts (max {MAX_LOCALPARTS}). "
-            "This tool does not brute-force or guess mailbox names."
+    try:
+        return shared_normalize_localparts(
+            raw, label="SMIMEA local-part", flag="--smimea"
         )
-    return tuple(seen)
+    except LocalpartError as exc:
+        raise SmimeaLocalpartError(str(exc)) from exc
 
 
 def association_length_of(cert: object) -> int:
