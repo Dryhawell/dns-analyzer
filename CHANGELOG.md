@@ -2,6 +2,26 @@
 
 All notable changes to DNS Analyzer are documented here.
 
+## 1.29.0 — 2026-09-23
+
+CERT listing. Certificates in DNS are listed; bytes are not dumped and PKIX is not validated.
+
+### Added
+
+- Opt-in `--cert` lists up to 8 CERT records (type, key tag, algorithm, certificate length)
+- CLI/JSON/HTML include `cert` only when `--cert` is used
+- Findings: `cert_missing` / `cert_unreadable` are info (+0)
+- `--record CERT` is rejected with a hint to use `--cert`
+
+### Notes
+
+- Missing CERT is common and is not a compromise
+- Certificate / CRL bytes are not dumped; only length is listed
+- PKIX is not validated; CAs are not contacted
+- Type URI / OID pointers are not fetched
+- Listing a CERT record is not proof that a TLS certificate is in DNS
+- CERT is not TLSA and is not a replacement for CAA
+
 ## 1.28.0 — 2026-09-22
 
 OPENPGPKEY listing. OpenPGP keys in DNS are listed; key bytes are not dumped.

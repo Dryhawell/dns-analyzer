@@ -23,6 +23,7 @@ from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
 from analyzer.ipseckey import IpseckeyObservation
+from analyzer.cert import CertObservation
 from analyzer.smimea import SmimeaObservation
 from analyzer.openpgpkey import OpenpgpkeyObservation
 from analyzer.fcrdns import FcrdnsObservation
@@ -72,7 +73,7 @@ class SecurityReport:
 
 
 class SecurityAnalyzer:
-    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/IPSECKEY/SMIMEA/OPENPGPKEY/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
+    """Build findings from lookup + DNSSEC/SPF/DMARC/DKIM/SRV/NAPTR/URI/DNAME/IPSECKEY/CERT/SMIMEA/OPENPGPKEY/MTA-STS/TLS-RPT/BIMI/TLSA/SSHFP/FCrDNS/MX-host/NS-host/CNAME-target/SOA-NS/CAA/CDS/NSEC/CSYNC/ZONEMD/RRSIG observations."""
 
     def analyze(
         self,
@@ -97,6 +98,7 @@ class SecurityAnalyzer:
         uri: UriObservation | None = None,
         dname: DnameObservation | None = None,
         ipseckey: IpseckeyObservation | None = None,
+        cert: CertObservation | None = None,
         smimea: Sequence[SmimeaObservation] = (),
         openpgpkey: Sequence[OpenpgpkeyObservation] = (),
         cds: CdsObservation | None = None,
@@ -119,6 +121,8 @@ class SecurityAnalyzer:
             findings.extend(self._dname(dname))
         if ipseckey is not None:
             findings.extend(self._ipseckey(ipseckey))
+        if cert is not None:
+            findings.extend(self._cert(cert))
         findings.extend(self._smimea(smimea))
         findings.extend(self._openpgpkey(openpgpkey))
         if cds is not None:
@@ -621,6 +625,43 @@ class SecurityAnalyzer:
                         "gateway domain name."
                     ),
                     code="ipseckey_missing",
+                )
+            ]
+        return []
+
+    def _cert(self, observation: CertObservation) -> list[SecurityFinding]:
+        if observation.error:
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CERT could not be read",
+                    description=(
+                        f"{observation.error} A timeout is not the same as a missing "
+                        "CERT set, and it is not a compromise."
+                    ),
+                    recommendation=(
+                        "Retry the lookup before treating CERT as unpublished."
+                    ),
+                    code="cert_unreadable",
+                )
+            ]
+        if observation.status == "NOT DETECTED":
+            return [
+                SecurityFinding(
+                    severity="info",
+                    title="CERT not published",
+                    description=(
+                        f"No CERT record was found at {observation.query_name}. "
+                        "Most names do not publish CERT. This is not proof that "
+                        "a TLS certificate is missing, unused, or misconfigured."
+                    ),
+                    recommendation=(
+                        "Use --cert only when you expect a certificate or CRL "
+                        "at this name. This tool does not validate PKIX, does "
+                        "not dump certificate bytes, and does not fetch type "
+                        "URI URLs. CERT is not TLSA or CAA."
+                    ),
+                    code="cert_missing",
                 )
             ]
         return []

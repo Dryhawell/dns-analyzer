@@ -22,6 +22,7 @@ from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
 from analyzer.ipseckey import IpseckeyObservation
+from analyzer.cert import CertObservation
 from analyzer.smimea import SmimeaObservation
 from analyzer.openpgpkey import OpenpgpkeyObservation
 from analyzer.fcrdns import FcrdnsObservation
@@ -75,6 +76,7 @@ class DNSAnalysisResult:
     uri: UriObservation | None = None
     dname: DnameObservation | None = None
     ipseckey: IpseckeyObservation | None = None
+    cert: CertObservation | None = None
     smimea: tuple[SmimeaObservation, ...] | None = None
     openpgpkey: tuple[OpenpgpkeyObservation, ...] | None = None
     security: SecurityReport | None = None

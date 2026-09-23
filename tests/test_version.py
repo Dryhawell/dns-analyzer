@@ -7,4 +7,4 @@ def test_version_is_semver_triplet() -> None:
     parts = __version__.split(".")
     assert len(parts) == 3
     assert all(part.isdigit() for part in parts)
-    assert __version__ == "1.28.0"
+    assert __version__ == "1.29.0"

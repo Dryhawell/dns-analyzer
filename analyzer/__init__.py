@@ -43,6 +43,7 @@ from analyzer.naptr import NaptrObservation, evaluate_naptr
 from analyzer.uri import UriObservation, evaluate_uri
 from analyzer.dname import DnameObservation, evaluate_dname
 from analyzer.ipseckey import IpseckeyObservation, evaluate_ipseckey
+from analyzer.cert import CertObservation, evaluate_cert
 from analyzer.smimea import SmimeaObservation, evaluate_smimea
 from analyzer.openpgpkey import OpenpgpkeyObservation, evaluate_openpgpkey
 from analyzer.mtasts import MtaStsObservation, evaluate_mta_sts
@@ -91,6 +92,8 @@ __all__ = [
     "evaluate_dname",
     "IpseckeyObservation",
     "evaluate_ipseckey",
+    "CertObservation",
+    "evaluate_cert",
     "SmimeaObservation",
     "evaluate_smimea",
     "OpenpgpkeyObservation",

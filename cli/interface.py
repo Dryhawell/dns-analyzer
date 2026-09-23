@@ -79,6 +79,7 @@ from analyzer.naptr import NaptrObservation
 from analyzer.uri import UriObservation
 from analyzer.dname import DnameObservation
 from analyzer.ipseckey import IpseckeyObservation
+from analyzer.cert import CertObservation
 from analyzer.tlsrpt import TlsRptObservation
 from analyzer.ttl import describe_cache, format_duration, format_ttl_line, summarize_ttls
 from analyzer.validator import DomainValidationError, normalize_domain
@@ -111,6 +112,7 @@ Examples:
   python main.py example.com --uri
   python main.py example.com --dname
   python main.py example.com --ipseckey
+  python main.py example.com --cert
   python main.py example.com --smimea alice
   python main.py example.com --openpgpkey alice
   python main.py example.com --format json
@@ -128,12 +130,13 @@ type plus DNSSEC, SPF, DMARC, MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, FCrDNS, 
 --uri is opt-in; the target is not fetched and service prefixes are never guessed.
 --dname is opt-in; CNAME is not synthesized and the subtree is not walked.
 --ipseckey is opt-in; IPsec is not probed and key material is not dumped.
+--cert is opt-in; cert bytes are not dumped; missing CERT is an observation.
 --smimea LOCALPART is opt-in; local-parts are never guessed; missing SMIMEA is an observation.
 --openpgpkey LOCALPART is opt-in; local-parts are never guessed; missing OPENPGPKEY is an observation.
 
 This is not a vulnerability scanner. Missing DNSSEC, SPF, DMARC, DKIM, CAA,
-MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, DNAME, IPSECKEY, SMIMEA, or OPENPGPKEY is an observation, not proof of compromise.
-Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG / missing IPSECKEY / missing SMIMEA / missing OPENPGPKEY are also observations, not hijacking.
+MTA-STS, TLS-RPT, BIMI, DANE TLSA, SSHFP, SRV, NAPTR, URI, DNAME, IPSECKEY, CERT, SMIMEA, or OPENPGPKEY is an observation, not proof of compromise.
+Missing PTR / FCrDNS mismatch / MX host issues / NS host issues / CNAME target issues / hidden SOA primary / missing CDS / missing NSEC / missing CSYNC / missing ZONEMD / missing RRSIG / missing IPSECKEY / missing CERT / missing SMIMEA / missing OPENPGPKEY are also observations, not hijacking.
 """
 
 
@@ -205,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
             "URI is --uri, not --record URI. "
             "DNAME is --dname, not --record DNAME. "
             "IPSECKEY is --ipseckey, not --record IPSECKEY. "
+            "CERT is --cert, not --record CERT. "
             "SMIMEA is --smimea, not --record SMIMEA. "
             "OPENPGPKEY is --openpgpkey, not --record OPENPGPKEY. "
             "TLSA is DANE at _443._tcp, not --record TLSA. "
@@ -275,6 +279,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Look up IPSECKEY at this domain (precedence, gateway type, "
             "algorithm, gateway, key length). IPsec is not probed; key "
             "material is not dumped; a gateway domain name is not resolved."
+        ),
+    )
+    parser.add_argument(
+        "--cert",
+        action="store_true",
+        help=(
+            "Look up CERT at this domain (type, key tag, algorithm, "
+            "certificate length). Certificate bytes are not dumped; PKIX "
+            "is not validated; type URI URLs are not fetched."
         ),
     )
     parser.add_argument(
@@ -359,7 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _normalize_record_type(raw: str) -> str | None:
     value = raw.strip().upper()
-    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "IPSECKEY", "SMIMEA", "OPENPGPKEY", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
+    if value in {"PTR", "SRV", "NAPTR", "URI", "DNAME", "IPSECKEY", "CERT", "SMIMEA", "OPENPGPKEY", "TLSA", "SSHFP", "CDS", "CDNSKEY", "NSEC", "NSEC3", "NSEC3PARAM", "CSYNC", "ZONEMD", "RRSIG"}:
         return None
     if value not in _RECORD_TYPES:
         return ""
@@ -392,6 +405,11 @@ def _record_type_error(raw: str) -> str:
             "IPSECKEY is opt-in. Use --ipseckey. This tool does not probe IPsec "
             "or IKE, does not dump key material, and does not resolve a "
             "gateway domain name."
+        )
+    if kind == "CERT":
+        return (
+            "CERT is opt-in. Use --cert. This tool does not dump certificate "
+            "bytes, does not validate PKIX, and does not fetch type URI URLs."
         )
     if kind == "SMIMEA":
         return (
@@ -475,11 +493,12 @@ def resolve_report_view(args: argparse.Namespace) -> ReportView | str:
         or args.uri
         or args.dname
         or args.ipseckey
+        or args.cert
         or args.smimea_localparts
         or args.openpgpkey_localparts
     ):
         return (
-            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname/--ipseckey/--smimea/--openpgpkey) "
+            "Use either a domain (with --record/--security/--all/--dkim/--srv/--naptr/--uri/--dname/--ipseckey/--cert/--smimea/--openpgpkey) "
             "or --reverse, not both."
         )
 
@@ -830,6 +849,7 @@ def _print_lookup(
     uri: UriObservation | None = None,
     dname: DnameObservation | None = None,
     ipseckey: IpseckeyObservation | None = None,
+    cert: CertObservation | None = None,
     smimea: tuple[SmimeaObservation, ...] | None = None,
     openpgpkey: tuple[OpenpgpkeyObservation, ...] | None = None,
 ) -> None:
@@ -885,6 +905,8 @@ def _print_lookup(
         _print_dname(dname)
     if ipseckey is not None:
         _print_ipseckey(ipseckey)
+    if cert is not None:
+        _print_cert(cert)
     if smimea:
         for item in smimea:
             _print_smimea(item)
@@ -1584,6 +1606,33 @@ def _print_ipseckey(observation: IpseckeyObservation) -> None:
     print()
 
 
+def _print_cert(observation: CertObservation) -> None:
+    print("CERT")
+    print("────────────────────────")
+    print(f"Queried: {observation.query_name}")
+    print(f"Status: {observation.status}")
+    if observation.status == "NOT DETECTED":
+        print("No CERT records at this name.")
+    for item in observation.certs:
+        print(
+            f"  {item.cert_type} {item.key_tag} {item.algorithm} "
+            f"cert-length={item.cert_length}"
+        )
+        print(f"Certificate type: {item.cert_type} — {item.cert_type_meaning}")
+        print(f"Key tag: {item.key_tag}")
+        print(f"Algorithm: {item.algorithm} — {item.algorithm_meaning}")
+        print(f"Certificate length: {item.cert_length}")
+        print()
+    if observation.truncated:
+        print("Note: more than 8 CERT records; extras were not listed.")
+        print()
+    if observation.error:
+        print(f"Note: {observation.error}")
+        print()
+    print(observation.note)
+    print()
+
+
 def _print_smimea(observation: SmimeaObservation) -> None:
     print("SMIMEA")
     print("────────────────────────")
@@ -1830,6 +1879,7 @@ def _print_usage() -> None:
     print("       python main.py <domain> --uri")
     print("       python main.py <domain> --dname")
     print("       python main.py <domain> --ipseckey")
+    print("       python main.py <domain> --cert")
     print("       python main.py <domain> --smimea alice")
     print("       python main.py <domain> --openpgpkey alice")
     print("       python main.py <domain> --format json")
@@ -1924,6 +1974,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.uri
             or args.dname
             or args.ipseckey
+            or args.cert
             or args.smimea_localparts
             or args.openpgpkey_localparts
         )
@@ -2040,6 +2091,7 @@ def _run(argv: list[str] | None = None) -> int:
     uri_observation = None
     dname_observation = None
     ipseckey_observation = None
+    cert_observation = None
     smimea_observations = None
     openpgpkey_observations = None
     try:
@@ -2048,6 +2100,7 @@ def _run(argv: list[str] | None = None) -> int:
             + (1 if args.uri else 0)
             + (1 if args.dname else 0)
             + (1 if args.ipseckey else 0)
+            + (1 if args.cert else 0)
         )
         if view.show_security:
             workers = (
@@ -2099,6 +2152,9 @@ def _run(argv: list[str] | None = None) -> int:
                     if args.ipseckey
                     else None
                 )
+                fut_cert = (
+                    pool.submit(resolver.inspect_cert, domain) if args.cert else None
+                )
                 fut_smimea = [
                     pool.submit(resolver.inspect_smimea, domain, part)
                     for part in localparts
@@ -2137,6 +2193,8 @@ def _run(argv: list[str] | None = None) -> int:
                     dname_observation = fut_dname.result()
                 if fut_ipseckey is not None:
                     ipseckey_observation = fut_ipseckey.result()
+                if fut_cert is not None:
+                    cert_observation = fut_cert.result()
                 if localparts:
                     smimea_observations = tuple(item.result() for item in fut_smimea)
                 if openpgpkey_parts:
@@ -2167,6 +2225,7 @@ def _run(argv: list[str] | None = None) -> int:
                 uri=uri_observation,
                 dname=dname_observation,
                 ipseckey=ipseckey_observation,
+                cert=cert_observation,
                 smimea=smimea_observations or (),
                 openpgpkey=openpgpkey_observations or (),
                 cds=cds,
@@ -2184,6 +2243,7 @@ def _run(argv: list[str] | None = None) -> int:
             or args.uri
             or args.dname
             or args.ipseckey
+            or args.cert
         ):
             extra = (
                 len(selectors)
@@ -2216,6 +2276,9 @@ def _run(argv: list[str] | None = None) -> int:
                         if args.ipseckey
                         else None
                     )
+                    fut_cert = (
+                        pool.submit(resolver.inspect_cert, domain) if args.cert else None
+                    )
                     fut_smimea = [
                         pool.submit(resolver.inspect_smimea, domain, part)
                         for part in localparts
@@ -2236,6 +2299,8 @@ def _run(argv: list[str] | None = None) -> int:
                         dname_observation = fut_dname.result()
                     if fut_ipseckey is not None:
                         ipseckey_observation = fut_ipseckey.result()
+                    if fut_cert is not None:
+                        cert_observation = fut_cert.result()
                     if localparts:
                         smimea_observations = tuple(item.result() for item in fut_smimea)
                     if openpgpkey_parts:
@@ -2259,6 +2324,8 @@ def _run(argv: list[str] | None = None) -> int:
                     dname_observation = resolver.inspect_dname(domain)
                 if args.ipseckey:
                     ipseckey_observation = resolver.inspect_ipseckey(domain)
+                if args.cert:
+                    cert_observation = resolver.inspect_cert(domain)
                 if localparts:
                     smimea_observations = tuple(
                         resolver.inspect_smimea(domain, part) for part in localparts
@@ -2323,6 +2390,7 @@ def _run(argv: list[str] | None = None) -> int:
         uri=uri_observation,
         dname=dname_observation,
         ipseckey=ipseckey_observation,
+        cert=cert_observation,
         smimea=smimea_observations,
         openpgpkey=openpgpkey_observations,
         security=security,
@@ -2371,6 +2439,7 @@ def _run(argv: list[str] | None = None) -> int:
             uri_observation,
             dname_observation,
             ipseckey_observation,
+            cert_observation,
             smimea_observations,
             openpgpkey_observations,
         )

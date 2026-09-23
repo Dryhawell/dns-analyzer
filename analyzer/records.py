@@ -9,6 +9,7 @@ from analyzer.naptr import flags_meaning
 from analyzer.uri import scheme_meaning, uri_scheme
 from analyzer.rrsig import format_rrsig_value, rrsig_details
 from analyzer.ipseckey import format_ipseckey_value, ipseckey_details
+from analyzer.cert import format_cert_value, cert_details
 from analyzer.smimea import format_smimea_value, smimea_details
 from analyzer.openpgpkey import format_openpgpkey_value, openpgpkey_details
 from analyzer.sshfp import algorithm_meaning, fingerprint_hex, fp_type_meaning
@@ -46,6 +47,9 @@ def format_rdata(record_type: str, rdata: object) -> str:
 
     if rtype == "IPSECKEY":
         return format_ipseckey_value(rdata)
+
+    if rtype == "CERT":
+        return format_cert_value(rdata)
 
     if rtype == "SMIMEA":
         return format_smimea_value(rdata)
@@ -149,6 +153,8 @@ def _record_details(record_type: str, rdata: object) -> tuple[tuple[str, str], .
         )
     if rtype == "IPSECKEY":
         return ipseckey_details(rdata)
+    if rtype == "CERT":
+        return cert_details(rdata)
     if rtype == "SMIMEA":
         return smimea_details(rdata)
     if rtype == "OPENPGPKEY":

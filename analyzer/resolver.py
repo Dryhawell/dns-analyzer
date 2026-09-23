@@ -91,6 +91,7 @@ from analyzer.naptr import NaptrObservation, evaluate_naptr
 from analyzer.uri import UriObservation, evaluate_uri
 from analyzer.dname import DnameObservation, evaluate_dname
 from analyzer.ipseckey import IpseckeyObservation, evaluate_ipseckey
+from analyzer.cert import CertObservation, evaluate_cert
 from analyzer.smimea import SmimeaObservation, evaluate_smimea, smimea_query_name
 from analyzer.openpgpkey import (
     OpenpgpkeyObservation,
@@ -772,6 +773,20 @@ class DNSResolver:
 
     def resolve_ipseckey(self, name: str) -> list[DNSRecord]:
         return self._query(name, "IPSECKEY")
+
+    def inspect_cert(self, name: str) -> CertObservation:
+        """CERT lookup at <name>. Does not dump bytes or validate PKIX."""
+        host = name.rstrip(".").lower()
+        try:
+            records = self.resolve_cert(host)
+        except DomainNotFoundError:
+            return evaluate_cert(host, ())
+        except DNSQueryError as exc:
+            return evaluate_cert(host, (), error=str(exc))
+        return evaluate_cert(host, records)
+
+    def resolve_cert(self, name: str) -> list[DNSRecord]:
+        return self._query(name, "CERT")
 
     def inspect_smimea(self, name: str, local_part: str) -> SmimeaObservation:
         """SMIMEA lookup at hash._smimecert.<name>. Does not fetch certificates."""

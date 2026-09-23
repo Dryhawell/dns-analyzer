@@ -293,6 +293,29 @@ def test_ipseckey_domain_gateway_strips_dot() -> None:
     assert "domain name" in dict(row.details)["Gateway type"]
 
 
+def test_cert_value_lists_fields_without_cert_bytes() -> None:
+    rdata = DummyRdata(
+        "unused",
+        certificate_type=1,
+        key_tag=12345,
+        algorithm=8,
+        certificate=b"\xab" * 64,
+    )
+    value = format_rdata("CERT", rdata)
+    assert value == "1 12345 8 cert-length=64"
+    assert "abab" not in value.lower()
+    row = records_from_answer("CERT", "Example.COM.", SimpleAnswer(rdata, ttl=60))[0]
+    assert row.name == "example.com"
+    details = dict(row.details)
+    assert details["Certificate type"].startswith("1")
+    assert "PKIX" in details["Certificate type"]
+    assert details["Key tag"] == "12345"
+    assert "RSA/SHA-256" in details["Algorithm"]
+    assert details["Certificate length"] == "64"
+    assert "not dumped" in details["Note"].lower()
+    assert "not validate" in details["Note"].lower() or "pkix" in details["Note"].lower()
+
+
 def test_smimea_value_lists_length_without_association_bytes() -> None:
     rdata = DummyRdata(
         "unused",

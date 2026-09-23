@@ -75,6 +75,7 @@ def test_json_contains_required_keys() -> None:
     assert payload["uri"] is None
     assert payload["dname"] is None
     assert payload["ipseckey"] is None
+    assert payload["cert"] is None
     assert payload["smimea"] is None
     assert payload["openpgpkey"] is None
     assert payload["security_analysis"] is None
@@ -468,6 +469,48 @@ def test_json_and_html_include_ipseckey() -> None:
                         "IPSECKEY",
                         "example.com",
                         "10 3 2 <script>alert(1)</script> key-length=8",
+                        60,
+                    )
+                ],
+            )
+        )
+    )
+    assert "<script>alert(1)</script>" not in xss
+    assert "&lt;script&gt;" in xss
+
+
+def test_json_and_html_include_cert() -> None:
+    from analyzer.cert import evaluate_cert
+
+    observation = evaluate_cert(
+        "example.com",
+        [
+            DNSRecord(
+                "CERT",
+                "example.com",
+                "1 12345 8 cert-length=64",
+                300,
+            )
+        ],
+    )
+    result = _result(cert=observation)
+    payload = result_to_dict(result)
+    assert payload["cert"]["status"] == "FOUND"
+    assert payload["cert"]["certs"][0]["type"] == 1
+    assert payload["cert"]["certs"][0]["type_meaning"] == "PKIX"
+    assert payload["cert"]["certs"][0]["cert_length"] == 64
+    page = dumps_html(result)
+    assert "PKIX" in page
+    assert "CERT" in page
+    xss = dumps_html(
+        _result(
+            cert=evaluate_cert(
+                "<script>alert(1)</script>",
+                [
+                    DNSRecord(
+                        "CERT",
+                        "example.com",
+                        "1 1 8 cert-length=8",
                         60,
                     )
                 ],

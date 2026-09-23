@@ -262,6 +262,7 @@ def test_cli_prints_a_and_aaaa(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
     mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.inspect_ipseckey.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cert.assert_not_called()
     mock_resolver_cls.return_value.inspect_smimea.assert_not_called()
     mock_resolver_cls.return_value.inspect_openpgpkey.assert_not_called()
     mock_resolver_cls.return_value.inspect_cds.assert_called_once_with("example.com")
@@ -1098,6 +1099,7 @@ def test_cli_record_filter_hides_other_sections(mock_resolver_cls, capsys) -> No
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
     mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.inspect_ipseckey.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cert.assert_not_called()
     mock_resolver_cls.return_value.inspect_smimea.assert_not_called()
     mock_resolver_cls.return_value.inspect_openpgpkey.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -1153,6 +1155,7 @@ def test_cli_security_flag_skips_record_dump(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
     mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.inspect_ipseckey.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cert.assert_not_called()
     mock_resolver_cls.return_value.inspect_smimea.assert_not_called()
     mock_resolver_cls.return_value.inspect_openpgpkey.assert_not_called()
     mock_resolver_cls.return_value.lookup_core.assert_called_once_with(
@@ -1195,6 +1198,7 @@ def test_cli_all_flag_is_full_report(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_uri.assert_not_called()
     mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.inspect_ipseckey.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cert.assert_not_called()
     mock_resolver_cls.return_value.inspect_smimea.assert_not_called()
     mock_resolver_cls.return_value.inspect_openpgpkey.assert_not_called()
 
@@ -1553,6 +1557,7 @@ def test_cli_uri_prints_section(mock_resolver_cls, capsys) -> None:
     mock_resolver_cls.return_value.inspect_uri.assert_called_once_with("example.com")
     mock_resolver_cls.return_value.inspect_dname.assert_not_called()
     mock_resolver_cls.return_value.inspect_ipseckey.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cert.assert_not_called()
     mock_resolver_cls.return_value.inspect_smimea.assert_not_called()
     mock_resolver_cls.return_value.inspect_openpgpkey.assert_not_called()
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
@@ -1703,6 +1708,66 @@ def test_cli_ipseckey_json_includes_observation(mock_resolver_cls, capsys) -> No
     assert data["ipseckey"]["ipseckeys"][0]["key_length"] == 64
 
 
+def test_cli_record_cert_hints_cert_flag(capsys) -> None:
+    assert run(["example.com", "--record", "CERT"]) == 1
+    err = capsys.readouterr().err
+    assert "--cert" in err
+    assert "opt-in" in err.lower() or "pkix" in err.lower() or "dump" in err.lower()
+
+
+def test_cli_rejects_reverse_with_cert(capsys) -> None:
+    assert run(["--reverse", "8.8.8.8", "--cert"]) == 1
+    assert "--reverse" in capsys.readouterr().err
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_cert_prints_section(mock_resolver_cls, capsys) -> None:
+    from analyzer.cert import evaluate_cert
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_cert.return_value = evaluate_cert(
+        "example.com",
+        [DNSRecord("CERT", "example.com", "1 12345 8 cert-length=64", 300)],
+    )
+
+    assert run(["example.com", "--record", "A", "--cert"]) == 0
+    output = capsys.readouterr().out
+    assert "CERT" in output
+    assert "FOUND" in output
+    assert "PKIX" in output
+    assert "cert-length=64" in output
+    assert "SECURITY ANALYSIS" not in output
+    mock_resolver_cls.return_value.inspect_cert.assert_called_once_with("example.com")
+    mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
+    mock_resolver_cls.return_value.inspect_dname.assert_not_called()
+    mock_resolver_cls.return_value.inspect_ipseckey.assert_not_called()
+
+
+@patch("cli.interface.DNSResolver")
+def test_cli_cert_json_includes_observation(mock_resolver_cls, capsys) -> None:
+    from analyzer.cert import evaluate_cert
+
+    _bind(
+        mock_resolver_cls,
+        _lookup(a=[DNSRecord("A", "example.com", "93.184.216.34", 60)]),
+    )
+    mock_resolver_cls.return_value.inspect_cert.return_value = evaluate_cert(
+        "example.com",
+        [DNSRecord("CERT", "example.com", "1 12345 8 cert-length=64", 60)],
+    )
+
+    assert run(["example.com", "--cert", "--format", "json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["cert"]["status"] == "FOUND"
+    assert data["cert"]["certs"][0]["type"] == 1
+    assert data["cert"]["certs"][0]["type_meaning"] == "PKIX"
+    assert data["cert"]["certs"][0]["key_tag"] == 12345
+    assert data["cert"]["certs"][0]["cert_length"] == 64
+
+
 def test_cli_record_smimea_hints_smimea_flag(capsys) -> None:
     assert run(["example.com", "--record", "SMIMEA"]) == 1
     err = capsys.readouterr().err
@@ -1742,6 +1807,7 @@ def test_cli_smimea_prints_section(mock_resolver_cls, capsys) -> None:
     )
     mock_resolver_cls.return_value.inspect_dnssec.assert_not_called()
     mock_resolver_cls.return_value.inspect_ipseckey.assert_not_called()
+    mock_resolver_cls.return_value.inspect_cert.assert_not_called()
     mock_resolver_cls.return_value.inspect_openpgpkey.assert_not_called()
 
 
@@ -1841,6 +1907,7 @@ def test_cli_help_lists_modes() -> None:
     assert "--uri" in help_text
     assert "--dname" in help_text
     assert "--ipseckey" in help_text
+    assert "--cert" in help_text
     assert "--smimea" in help_text
     assert "--openpgpkey" in help_text
     assert "--all" in help_text
@@ -1890,6 +1957,7 @@ def test_cli_format_json_stdout(mock_resolver_cls, capsys) -> None:
     assert data["uri"] is None
     assert data["dname"] is None
     assert data["ipseckey"] is None
+    assert data["cert"] is None
     assert data["smimea"] is None
     assert data["openpgpkey"] is None
     assert data["mta_sts"]["query_name"] == "_mta-sts.example.com"

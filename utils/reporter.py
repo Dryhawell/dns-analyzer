@@ -42,6 +42,7 @@ from analyzer.naptr import NaptrObservation, NaptrRewrite
 from analyzer.uri import UriObservation, UriTarget
 from analyzer.dname import DnameObservation, DnameTarget
 from analyzer.ipseckey import IpseckeyObservation, IpseckeyRecord
+from analyzer.cert import CertObservation, CertRecord
 from analyzer.smimea import SmimeaObservation, SmimeaAssociation
 from analyzer.openpgpkey import OpenpgpkeyObservation, OpenpgpkeyRecord
 from analyzer.tlsrpt import TlsRptObservation
@@ -104,6 +105,7 @@ def result_to_dict(result: DNSAnalysisResult) -> dict[str, object]:
         "uri": _uri_dict(result.uri) if result.uri is not None else None,
         "dname": _dname_dict(result.dname) if result.dname is not None else None,
         "ipseckey": _ipseckey_dict(result.ipseckey) if result.ipseckey is not None else None,
+        "cert": _cert_dict(result.cert) if result.cert is not None else None,
         "smimea": [_smimea_dict(item) for item in result.smimea] if result.smimea is not None else None,
         "openpgpkey": [_openpgpkey_dict(item) for item in result.openpgpkey] if result.openpgpkey is not None else None,
         "security_analysis": _security_dict(result.security),
@@ -754,6 +756,17 @@ def _ipseckey_dict(observation: IpseckeyObservation) -> dict[str, object]:
     }
 
 
+def _cert_dict(observation: CertObservation) -> dict[str, object]:
+    return {
+        "status": observation.status,
+        "query_name": observation.query_name,
+        "certs": [_cert_record_dict(item) for item in observation.certs],
+        "truncated": observation.truncated,
+        "note": observation.note,
+        "error": observation.error,
+    }
+
+
 def _smimea_dict(observation: SmimeaObservation) -> dict[str, object]:
     return {
         "status": observation.status,
@@ -803,6 +816,17 @@ def _ipseckey_record_dict(item: IpseckeyRecord) -> dict[str, object]:
         "algorithm_meaning": item.algorithm_meaning,
         "gateway": item.gateway,
         "key_length": item.key_length,
+    }
+
+
+def _cert_record_dict(item: CertRecord) -> dict[str, object]:
+    return {
+        "type": item.cert_type,
+        "type_meaning": item.cert_type_meaning,
+        "key_tag": item.key_tag,
+        "algorithm": item.algorithm,
+        "algorithm_meaning": item.algorithm_meaning,
+        "cert_length": item.cert_length,
     }
 
 
@@ -945,6 +969,8 @@ def _html_document(result: DNSAnalysisResult) -> str:
         parts.extend(_html_dname(result.dname))
     if result.ipseckey is not None:
         parts.extend(_html_ipseckey(result.ipseckey))
+    if result.cert is not None:
+        parts.extend(_html_cert(result.cert))
     if result.smimea:
         for item in result.smimea:
             parts.extend(_html_smimea(item))
@@ -1757,6 +1783,44 @@ def _html_ipseckey(observation: IpseckeyObservation) -> list[str]:
     if observation.truncated:
         parts.append(
             '<p class="note">more than 8 IPSECKEY records; extras were not listed.</p>'
+        )
+    if observation.error:
+        parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
+    parts.append(f"<p class=\"note\">{_e(observation.note)}</p>")
+    return parts
+
+
+def _html_cert(observation: CertObservation) -> list[str]:
+    parts = [
+        "<h2>CERT</h2>",
+        f"<p>Queried: <code>{_e(observation.query_name)}</code></p>",
+        f"<p>Status: <strong>{_e(observation.status)}</strong></p>",
+    ]
+    if observation.status == "NOT DETECTED":
+        parts.append("<p>No CERT records at this name.</p>")
+    if observation.certs:
+        parts.extend(
+            [
+                "<table>",
+                "<thead><tr><th>Type</th><th>Key tag</th>"
+                "<th>Algorithm</th><th>Certificate length</th>"
+                "</tr></thead>",
+                "<tbody>",
+            ]
+        )
+        for item in observation.certs:
+            parts.append(
+                "<tr>"
+                f"<td>{item.cert_type} {_e(item.cert_type_meaning)}</td>"
+                f"<td>{item.key_tag}</td>"
+                f"<td>{item.algorithm} {_e(item.algorithm_meaning)}</td>"
+                f"<td>{item.cert_length}</td>"
+                "</tr>"
+            )
+        parts.extend(["</tbody>", "</table>"])
+    if observation.truncated:
+        parts.append(
+            '<p class="note">more than 8 CERT records; extras were not listed.</p>'
         )
     if observation.error:
         parts.append(f"<p class=\"note\">{_e(observation.error)}</p>")
